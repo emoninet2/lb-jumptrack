@@ -13,3 +13,8 @@ archive/
 .env
 .env.*
 *.pem
+
+# Desktop packaging outputs and local tool caches.
+/build/
+/dist/
+/.venv-build/

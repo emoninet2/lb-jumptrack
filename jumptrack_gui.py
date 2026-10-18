@@ -11,7 +11,7 @@ from pathlib import Path
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtCore import QDateTime, QObject, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QColor, QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_metadata import APP_NAME, APP_VERSION
 from gui_backend import CONFIRMATIONS, DeviceSession, Draft, records
 from profile_decoder import decode_profile, format_profile_summary, parse_profile
 
@@ -79,6 +80,16 @@ QProgressBar::chunk {background:#16849a;}
 def configure_theme(app):
     """Keep native controls readable even when the desktop uses a dark palette."""
     app.setStyle("Fusion")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
+    root = Path(__file__).resolve().parent
+    for icon in (
+        root / "assets" / "jumptrack.svg",
+        root / "packaging" / "jumptrack.svg",
+    ):
+        if icon.is_file():
+            app.setWindowIcon(QIcon(str(icon)))
+            break
     palette = QPalette()
     colors = {
         QPalette.ColorRole.Window: "#f3f6fa",
@@ -252,7 +263,9 @@ class MainWindow(QMainWindow):
         self.profile_cache = {}
         self.current_profile = None
         self.closing_ready = False
-        self.setWindowTitle("JumpTrack Desktop" + (" — Demo" if demo else ""))
+        self.setWindowTitle(
+            f"JumpTrack Desktop {APP_VERSION}" + (" — Demo" if demo else "")
+        )
         self.resize(1220, 880)
         root = QWidget()
         self.setCentralWidget(root)
@@ -1290,6 +1303,9 @@ class MainWindow(QMainWindow):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--version", action="version", version=f"{APP_NAME} {APP_VERSION}"
+    )
     parser.add_argument(
         "--demo",
         action="store_true",

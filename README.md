@@ -22,6 +22,20 @@ live request. Constants, help, the command tree and dry runs need no connection.
 
 ## Desktop GUI
 
+For a computer without Python, the shared desktop build pipeline produces a
+Windows installer/portable ZIP, macOS DMG/app ZIP (Intel and Apple Silicon), and
+Linux AppImage/TAR.GZ (x64 and ARM64). See [installation instructions](docs/INSTALLING.md)
+for choosing and opening a package. These are unsigned development packages;
+Windows/macOS Bluetooth behavior still needs real-machine validation.
+
+The **Desktop packages** GitHub Actions workflow builds and smoke-tests all five
+targets from the same source after changes. Download packages from a successful
+workflow run's artifacts; no release is published automatically. Maintainers can
+build locally with `python build_desktop.py --native`. See
+[packaging and release maintenance](docs/PACKAGING.md).
+
+To run directly from source:
+
 ```bash
 .venv/bin/python -m pip install -r requirements-gui.txt
 .venv/bin/python jumptrack_gui.py
@@ -408,6 +422,9 @@ Skipped tests on other checkouts are not current execution evidence.
 | `jumptrack.py` | BLE transport, response interpretation and CLI entry point |
 | `jumptrack_gui.py` | Desktop GUI and background asyncio bridge |
 | `gui_backend.py` / `gui_demo.py` | Staged settings session and explicit synthetic demo |
+| `app_metadata.py` / `desktop_entry.py` | Shared app identity and packaged startup/logging |
+| `build_desktop.py` / `packaging/` | Shared desktop bundler, native installers and icon source |
+| `.github/workflows/desktop.yml` | Windows, macOS and Linux builds with packaged smoke tests |
 | `jumptrack_cli.py` | Command definitions, grouping, routing and previews |
 | `java_uart_command_builder.py` | Java-derived commands and JSON adapters |
 | `uart_command_builder.py` | Compatible Python-friendly builder aliases |
