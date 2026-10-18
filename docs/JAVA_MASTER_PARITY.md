@@ -1,6 +1,6 @@
 # Java master parity audit
 
-The authority is `local UARTCommandBuilder.java`. It was not edited.
+This records the historical audit against the private `UARTCommandBuilder.java` reference. The reference is not distributed and is absent from this checkout. Current tests use saved signatures; source-hash and Java-execution checks skip without it. The audit did not modify the source.
 
 SHA-256 before and after this audit:
 
@@ -27,7 +27,7 @@ The public profile regex remains a constant; it is not enforced by the Java prof
 
 ## Verification and limits
 
-41 test functions pass after adding profile conversion tests. All 40 Java signatures are still covered. The independent Java oracle compared 663 cases spanning every overload, enums, booleans, boundaries, negatives, oversized formatted fields, null inputs/results, bad lists, Unicode numeric strings and parse errors. All matched. The same 663 input cases pass through the JSON CLI adapter with matching results/errors.
+At the time of that audit, 41 test functions passed after adding profile conversion tests. All 40 Java signatures are still covered. The independent Java oracle compared 663 cases spanning every overload, enums, booleans, boundaries, negatives, oversized formatted fields, null inputs/results, bad lists, Unicode numeric strings and parse errors. All matched. The same 663 input cases pass through the JSON CLI adapter with matching results/errors.
 
 The original source is decompiled Android/Kotlin code and cannot compile standalone. The test extracts its actual method bodies and generated enum-switch mapping into a temporary Java class, stubs missing runtime helpers, and repairs only the decompiler artifact `Iterator<T>` to `Iterator<?>`. Helper stubs mimic StringUtils numeric validation, null checks and the documented format constant; the oracle validates the command logic, not the full Android runtime. Java output uses Locale.US for ASCII comparison. Python maps Calendar to datetime, Java exceptions to TypeError/ValueError, and Crashlytics to logging. External enum classes were not supplied: their referenced names/branches are represented, and DateFormat.US represents the non-EU branch. Compiler metadata, StabilityInferred markers and synthetic constructor markers have no separate command behavior to expose.
 

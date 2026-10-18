@@ -63,7 +63,7 @@ converted = convert_profile(
 print(raw[0], converted["pressure_hpa"][0], converted["estimated_height"][0])
 ```
 
-The decoder currently assumes the observed 16-decimal-field header and four-digit hex word layout. It preserves every header field without assigning undocumented meanings. The saved response yields 1,216 words; the last header field is 1217, whose meaning is still unknown. Checksums remain unverified. An APK response parser or protocol specification is still needed for confirmed units and sample timing.
+The decoder currently assumes the observed 16-decimal-field header and four-digit hex word layout. It preserves every header field without assigning undocumented meanings. The saved response yields 1,216 words; the last header field is 1217, consistent with the count evidence below. Its exact inclusive convention remains unknown. Checksums remain unverified. An APK response parser or protocol specification is still needed for confirmed units and sample timing.
 
 ## Additional profile-count evidence
 

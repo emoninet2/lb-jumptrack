@@ -2,7 +2,7 @@
 
 Install: pip install bleak
 Run: python jumptrack.py
-Optional: python jumptrack.py --profile 35
+Optional: python jumptrack.py logbook profile 35
 
 Default runs are read-only. Explicit setting commands change configuration.
 Destructive subcommands require --allow-destructive.
@@ -12,19 +12,23 @@ command-builder source; returned values are raw device responses.
 
 import argparse
 import asyncio
-import re
 import json
 import os
-from pathlib import Path
+import re
 from datetime import datetime
+from pathlib import Path
+
 from bleak import BleakClient
 from bleak.exc import BleakError
-from uart_command_builder import UARTCommandBuilder
-from java_uart_command_builder import SIGNATURES, READ_METHODS, DESTRUCTIVE_METHODS
 
-_ADDRESS_FILE = Path(__file__).with_name('.jumptrack-address')
-ADDRESS = os.environ.get('JUMPTRACK_ADDRESS') or (
-    _ADDRESS_FILE.read_text(encoding='utf-8').strip() if _ADDRESS_FILE.exists() else None
+from java_uart_command_builder import DESTRUCTIVE_METHODS, READ_METHODS, SIGNATURES
+from uart_command_builder import UARTCommandBuilder
+
+_ADDRESS_FILE = Path(__file__).with_name(".jumptrack-address")
+ADDRESS = os.environ.get("JUMPTRACK_ADDRESS") or (
+    _ADDRESS_FILE.read_text(encoding="utf-8").strip()
+    if _ADDRESS_FILE.exists()
+    else None
 )
 UART_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 UART_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
@@ -56,20 +60,32 @@ def normalize_device_family(name):
 
 def is_verified_python_model(name):
     """Whether this exact model has been tested with this Python client."""
-    return isinstance(name, str) and " ".join(name.upper().split()) in VERIFIED_PYTHON_MODELS
-
+    return (
+        isinstance(name, str)
+        and " ".join(name.upper().split()) in VERIFIED_PYTHON_MODELS
+    )
 
 
 class JumpTrack:
-    def __init__(self, address=ADDRESS, *, allow_writes=False, allow_destructive=False, debug=False):
+    def __init__(
+        self,
+        address=ADDRESS,
+        *,
+        allow_writes=False,
+        allow_destructive=False,
+        debug=False,
+    ):
         address = address or ADDRESS
         if not address:
-            raise ValueError("Set --address, JUMPTRACK_ADDRESS, or a local .jumptrack-address file")
+            raise ValueError(
+                "Set --address, JUMPTRACK_ADDRESS, or a local .jumptrack-address file"
+            )
         self.commands = UARTCommandBuilder()
         self.client = BleakClient(address)
         self.buffer = bytearray()
         self.response_event = asyncio.Event()
         self.command_lock = asyncio.Lock()
+        self.settings_lock = asyncio.Lock()
         self.allow_writes = allow_writes
         self.allow_destructive = allow_destructive
         self.debug = debug
@@ -80,7 +96,7 @@ class JumpTrack:
         self.buffer.extend(data)
         if self.debug:
             print(f"RX HEX: {bytes(data).hex(' ')}")
-        if b"EOF\r\n" in self.buffer:
+        if re.search(rb"(?:^|\r\n)EOF\r\n", self.buffer):
             self.response_event.set()
 
     async def connect(self):
@@ -112,7 +128,15 @@ class JumpTrack:
                         raise
             print("Disconnected")
 
-    async def send_command(self, command, *, timeout=30, write=False, destructive=False, wait_for_response=True):
+    async def send_command(
+        self,
+        command,
+        *,
+        timeout=30,
+        write=False,
+        destructive=False,
+        wait_for_response=True,
+    ):
         """Send an ASCII command; return raw decoded response.
 
         Raises TimeoutError instead of silently returning incomplete data.
@@ -122,12 +146,21 @@ class JumpTrack:
         if command is None:
             raise ValueError("Java master returned null: no command was sent")
         if destructive and not self.allow_destructive:
-            raise PermissionError("Destructive commands disabled; pass allow_destructive=True explicitly")
+            raise PermissionError(
+                "Destructive commands disabled; pass allow_destructive=True explicitly"
+            )
         if write and not self.allow_writes:
-            raise PermissionError("Configuration commands disabled; pass allow_writes=True explicitly")
+            raise PermissionError(
+                "Configuration commands disabled; pass allow_writes=True explicitly"
+            )
         if not self.client.is_connected:
             raise ConnectionError("Not connected")
-        if not isinstance(command, str) or not command.isascii() or "\r" in command or "\n" in command:
+        if (
+            not isinstance(command, str)
+            or not command.isascii()
+            or "\r" in command
+            or "\n" in command
+        ):
             raise ValueError("Command must be one ASCII line without CR/LF")
         async with self.command_lock:
             self.buffer.clear()
@@ -142,9 +175,11 @@ class JumpTrack:
                 return "Command sent (no response requested)."
             try:
                 await asyncio.wait_for(self.response_event.wait(), timeout)
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 partial = self.buffer.decode("utf-8", errors="replace")
-                raise TimeoutError(f"No EOF after {timeout}s for {command!r}. Partial response:\n{partial}") from exc
+                raise TimeoutError(
+                    f"No EOF after {timeout}s for {command!r}. Partial response:\n{partial}"
+                ) from exc
             return self.buffer.decode("utf-8", errors="replace")
 
     async def execute_java(self, method, *args, timeout=30):
@@ -154,11 +189,21 @@ class JumpTrack:
         command = getattr(self.commands, method)(*args)
         if command is None:
             return None  # Java null is a no-command result; never send it.
-        return await self.send_command(
-            command, timeout=timeout,
-            write=method not in READ_METHODS and method not in DESTRUCTIVE_METHODS,
-            destructive=method in DESTRUCTIVE_METHODS,
-            **({'wait_for_response': False} if method == 'preparePowerOffCommand' else {}))
+        options = {
+            "timeout": timeout,
+            "write": method not in READ_METHODS and method not in DESTRUCTIVE_METHODS,
+            "destructive": method in DESTRUCTIVE_METHODS,
+        }
+        if method == "preparePowerOffCommand":
+            options["wait_for_response"] = False
+        if method in (
+            "prepareDeviceSettingsW40Command",
+            "prepareWriteDeviceSettingsW41Command",
+            "prepareDeviceSettingsW42Command",
+        ):
+            async with self.settings_lock:
+                return await self.send_command(command, **options)
+        return await self.send_command(command, **options)
 
     # Read-only: device and logbook
     async def get_device_info(self):
@@ -191,10 +236,19 @@ class JumpTrack:
         return await self.send_command(self.commands.get_settings_42())
 
     async def get_jump_profile_hex(self, jump_number, *, timeout=90):
-        return await self.send_command(self.commands.get_jump_profile_hex(jump_number), timeout=timeout)
+        return await self.send_command(
+            self.commands.get_jump_profile_hex(jump_number), timeout=timeout
+        )
 
-    async def get_acc(self, jump_number, start_time, duration, *, hex_format=True, timeout=90):
-        return await self.send_command(self.commands.get_acc(jump_number, start_time, duration, hex_format=hex_format), timeout=timeout)
+    async def get_acc(
+        self, jump_number, start_time, duration, *, hex_format=True, timeout=90
+    ):
+        return await self.send_command(
+            self.commands.get_acc(
+                jump_number, start_time, duration, hex_format=hex_format
+            ),
+            timeout=timeout,
+        )
 
     # Configuration methods: disabled unless allow_writes=True
     async def _write(self, command, *, timeout=30):
@@ -204,7 +258,9 @@ class JumpTrack:
         return await self._write(self.commands.set_datetime(value))
 
     async def power_off(self):
-        return await self.send_command(self.commands.power_off(), write=True, wait_for_response=False)
+        return await self.send_command(
+            self.commands.power_off(), write=True, wait_for_response=False
+        )
 
     async def set_distance_uom(self, unit):
         return await self._write(self.commands.set_distance_uom(unit))
@@ -213,7 +269,9 @@ class JumpTrack:
         return await self._write(self.commands.set_speed_uom(unit))
 
     async def set_total_freefall_time(self, hours, minutes, seconds):
-        return await self._write(self.commands.set_total_freefall_time(hours, minutes, seconds))
+        return await self._write(
+            self.commands.set_total_freefall_time(hours, minutes, seconds)
+        )
 
     async def set_flight_warnings(self, values, *, bank=None):
         return await self._write(self.commands.set_flight_warnings(values, bank=bank))
@@ -234,43 +292,105 @@ class JumpTrack:
         return await self._write(self.commands.set_default_alarm_values())
 
     async def set_settings_40(self, *, ble_mode, beeps, dive_type, temperature_unit):
-        return await self._write(self.commands.set_settings_40(ble_mode=ble_mode, beeps=beeps, dive_type=dive_type, temperature_unit=temperature_unit))
+        async with self.settings_lock:
+            return await self._write(
+                self.commands.set_settings_40(
+                    ble_mode=ble_mode,
+                    beeps=beeps,
+                    dive_type=dive_type,
+                    temperature_unit=temperature_unit,
+                )
+            )
+
+    async def get_all_settings(self):
+        raw = "\n".join(
+            [
+                await self.get_speed_uom(),
+                await self.get_settings_40(),
+                await self.get_settings_41(),
+                await self.get_settings_42(),
+            ]
+        )
+        return format_settings(raw)
+
+    async def get_dive_type(self):
+        raw = await self.get_settings_40()
+        values = parse_settings_40(raw)
+        return f"Dive type: {DIVE_TYPE_NAMES[values[2]]} (code {values[2]})\n\nRaw response:\n{raw}"
+
+    async def set_setting_field(self, group, index, value):
+        """Preserve a known settings record and verify one serialized field update."""
+        if not self.allow_writes:
+            raise PermissionError(
+                "Configuration commands disabled; pass allow_writes=True explicitly"
+            )
+        if (
+            type(group) is not int
+            or group not in SETTINGS_ALLOWED
+            or type(index) is not int
+            or index not in range(4)
+            or type(value) is not int
+            or value not in SETTINGS_ALLOWED[group][index]
+        ):
+            raise ValueError("Invalid settings field or value")
+        read = getattr(self, f"get_settings_{group}")
+        async with self.settings_lock:
+            fields = parse_settings_record(await read(), group)
+            if fields[index] == value:
+                return f"Settings W-{group} field {index + 1} already set to {value}."
+            fields[index] = value
+            try:
+                await self._write(f"W-{group}-" + "-".join(f"{v:05d}" for v in fields))
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"W-{group} response timed out; the change may have applied. "
+                    f"No retry was sent. Read R-{group} to check the device."
+                ) from exc
+            verified = parse_settings_record(await read(), group)
+            if verified != fields:
+                raise RuntimeError(
+                    f"W-{group} verification mismatch: expected {fields}, received {verified}"
+                )
+        return f"Settings W-{group} updated (verified by R-{group})."
 
     async def set_button_beeps(self, enabled):
-        """Read, change only W-40's beep field, then verify by reading back."""
+        """Change only button beeps using the shared settings transaction."""
         if not isinstance(enabled, bool):
             raise TypeError("enabled must be bool")
-        if not self.allow_writes:
-            raise PermissionError("Configuration commands disabled; pass allow_writes=True explicitly")
-        current = parse_settings_40(await self.get_settings_40())
-        if current[1] == int(enabled):
-            return f"Button beeps already {'on' if enabled else 'off'}."
-        updated = [*current]
-        updated[1] = int(enabled)
-        command = "W-40-" + "-".join(f"{value:05d}" for value in updated)
-        try:
-            await self._write(command)
-        except TimeoutError as exc:
-            raise TimeoutError(
-                "Beep command was sent, but its response timed out; the change may "
-                "have applied. No retry was sent. Read R-40 to check the device."
-            ) from exc
-        verified = parse_settings_40(await self.get_settings_40())
-        if verified != updated:
-            raise RuntimeError(f"W-40 verification mismatch: expected {updated}, received {verified}")
-        return f"Button beeps {'on' if enabled else 'off'} (verified by R-40)."
+        result = await self.set_setting_field(40, 1, int(enabled))
+        state = "on" if enabled else "off"
+        if "already set" in result:
+            return f"Button beeps already {state}."
+        return f"Button beeps {state} (verified by R-40)."
 
     async def set_settings_41(self, *, tap_to_enable_ble, flat_line):
-        return await self._write(self.commands.set_settings_41(tap_to_enable_ble=tap_to_enable_ble, flat_line=flat_line))
+        async with self.settings_lock:
+            return await self._write(
+                self.commands.set_settings_41(
+                    tap_to_enable_ble=tap_to_enable_ble, flat_line=flat_line
+                )
+            )
 
-    async def set_settings_42(self, *, backlight_value, date_format, show_time_under_canopy, lcd_timeout):
-        return await self._write(self.commands.set_settings_42(backlight_value=backlight_value, date_format=date_format, show_time_under_canopy=show_time_under_canopy, lcd_timeout=lcd_timeout))
+    async def set_settings_42(
+        self, *, backlight_value, date_format, show_time_under_canopy, lcd_timeout
+    ):
+        async with self.settings_lock:
+            return await self._write(
+                self.commands.set_settings_42(
+                    backlight_value=backlight_value,
+                    date_format=date_format,
+                    show_time_under_canopy=show_time_under_canopy,
+                    lcd_timeout=lcd_timeout,
+                )
+            )
 
     async def set_backlight(self, enabled, value=0):
         return await self._write(self.commands.set_backlight(enabled, value))
 
     async def enable_motion_alarm(self, countdown, sensitivity):
-        return await self._write(self.commands.enable_motion_alarm(countdown, sensitivity))
+        return await self._write(
+            self.commands.enable_motion_alarm(countdown, sensitivity)
+        )
 
     async def set_swoop_guide(self, enabled):
         return await self._write(self.commands.set_swoop_guide(enabled))
@@ -283,7 +403,9 @@ class JumpTrack:
         return await self._write(self.commands.set_active_bank(category, bank))
 
     async def set_altitude(self, altitude, *, negative=False):
-        return await self._write(self.commands.set_altitude(altitude, negative=negative))
+        return await self._write(
+            self.commands.set_altitude(altitude, negative=negative)
+        )
 
     # Destructive: require allow_destructive=True
     async def _destructive(self, command):
@@ -302,6 +424,7 @@ class JumpTrack:
 def _java_client_method(name):
     async def invoke(self, *args, timeout=30):
         return await self.execute_java(name, *args, timeout=timeout)
+
     invoke.__name__ = name
     invoke.__doc__ = f"Async transport for Java {name}; None means no command was sent."
     return invoke
@@ -311,17 +434,101 @@ for _java_name in SIGNATURES:
     setattr(JumpTrack, _java_name, _java_client_method(_java_name))
 
 
-def parse_settings_40(raw):
-    """Accept one complete W-40 record; reject unknown layouts before writing."""
-    if not isinstance(raw, str) or not re.search(r"(?m)^EOF\s*$", raw):
-        raise ValueError("Incomplete R-40 response; no settings changed")
-    records = [line.strip() for line in raw.splitlines() if line.strip().startswith("W-40")]
-    if len(records) != 1 or not re.fullmatch(r"W-40-(?:\d{5}-){3}\d{5}", records[0]):
-        raise ValueError("Expected exactly one W-40 settings record; cannot preserve other settings")
+DIVE_TYPE_NAMES = ("default", "3-sec", "slow (SLOW)", "super-slow (SUPER_SLOW)")
+
+
+def format_settings(raw):
+    """Interpret known response fields while retaining raw data and unknown codes."""
+    layouts = {
+        38: (("Speed units", ("mph", "kmh")),),
+        40: (
+            ("Bluetooth mode", ("automatic", "economy")),
+            ("Button beeps", ("off", "on")),
+            ("Dive type", DIVE_TYPE_NAMES),
+            ("Temperature units", ("celsius", "fahrenheit")),
+        ),
+        41: (
+            ("Flat-line", ("off", "on")),
+            ("Tap to enable BLE", ("off", "on")),
+            ("Reserved field 3", None),
+            ("Reserved field 4", None),
+        ),
+        42: (
+            ("Date format", ("eu", "us")),
+            ("Display timeout (raw value)", None),
+            ("Show time under canopy", ("off", "on")),
+            ("Backlight value", None),
+        ),
+    }
+    lines = []
+    for group, fields in layouts.items():
+        records = re.findall(rf"(?m)^W-{group}-([0-9-]+)\r?$", raw)
+        if len(records) != 1:
+            lines.append(f"R-{group}: cannot decode ({len(records)} matching records)")
+            continue
+        parts = records[0].split("-")
+        # W-38 uses four fields; only its final field selects the speed unit.
+        if group == 38 and len(parts) == 4:
+            parts = parts[-1:]
+        if len(parts) != len(fields) or not all(part.isdigit() for part in parts):
+            lines.append(f"R-{group}: unrecognized layout")
+            continue
+        for (label, choices), part in zip(fields, parts):
+            value = int(part)
+            decoded = (
+                (choices[value] if value < len(choices) else "unknown")
+                if choices
+                else str(value)
+            )
+            lines.append(
+                f"{label}: {decoded} (code {value})"
+                if choices
+                else f"{label}: {decoded}"
+            )
+    lines.append("TAS/SAS: no field defined in the available command definitions")
+    return "\n".join(lines) + "\n\nRaw responses:\n" + raw
+
+
+SETTINGS_ALLOWED = {
+    40: ((0, 1), (0, 1), (0, 1, 2, 3), (0, 1)),
+    41: ((0, 1), (0, 1), (0,), (0,)),
+    42: ((0, 1), range(2147483648), (0, 1), range(2147483648)),
+}
+
+
+def parse_settings_record(raw, group):
+    """Accept one complete known settings record before rewriting its fields."""
+    if group not in SETTINGS_ALLOWED:
+        raise ValueError("Unsupported settings group")
+    if (
+        not isinstance(raw, str)
+        or not raw.splitlines()
+        or raw.rstrip().splitlines()[-1] != "EOF"
+    ):
+        raise ValueError(f"Incomplete R-{group} response; cannot preserve settings")
+    records = [
+        line.strip()
+        for line in raw.splitlines()
+        if line.strip().startswith(f"W-{group}")
+    ]
+    pattern = rf"W-{group}-(?:[0-9]{{5,}}-){{3}}[0-9]{{5,}}"
+    if len(records) != 1 or not re.fullmatch(pattern, records[0]):
+        raise ValueError(
+            f"Expected exactly one W-{group} settings record; cannot preserve other settings"
+        )
     values = list(map(int, records[0].split("-")[2:]))
-    if any(value not in allowed for value, allowed in zip(values, ((0, 1), (0, 1), (0, 1, 2, 3), (0, 1)))):
-        raise ValueError("Unrecognized W-40 settings values; refusing to rewrite them")
+    if any(
+        value not in allowed for value, allowed in zip(values, SETTINGS_ALLOWED[group])
+    ):
+        raise ValueError(
+            f"Unrecognized W-{group} settings values; refusing to rewrite them"
+        )
     return values
+
+
+def parse_settings_40(raw):
+    """Compatibility wrapper for callers reading the W-40 layout."""
+    return parse_settings_record(raw, 40)
 
 
 def parse_jump_list(raw):
@@ -330,14 +537,22 @@ def parse_jump_list(raw):
     for line in raw.splitlines():
         parts = line.strip().split(",")
         if len(parts) == 8 and all(re.fullmatch(r"\d+", part) for part in parts):
-            number, year, month, day, hour, minute, unknown_1, unknown_2 = map(int, parts)
-            records.append({
-                "jump_number": number,
-                "timestamp": datetime(year, month, day, hour, minute).isoformat(),
-                "profile_count_field": unknown_1,
-                "unknown_1": unknown_1,  # Compatibility alias; inclusive convention unresolved.
-                "unknown_2": unknown_2,
-            })
+            number, year, month, day, hour, minute, unknown_1, unknown_2 = map(
+                int, parts
+            )
+            try:
+                timestamp = datetime(year, month, day, hour, minute).isoformat()
+            except ValueError:
+                continue
+            records.append(
+                {
+                    "jump_number": number,
+                    "timestamp": timestamp,
+                    "profile_count_field": unknown_1,
+                    "unknown_1": unknown_1,  # Compatibility alias; inclusive convention unresolved.
+                    "unknown_2": unknown_2,
+                }
+            )
     return records
 
 
@@ -395,19 +610,27 @@ def parse_warning_configuration(raw):
 
 def format_warning_configuration(config):
     """Human-readable summary of parsed R-00 warning settings."""
-    lines = ["JUMPTRACK WARNING CONFIGURATION", "=" * 40,
-             "Altitude unit: not verified (values shown as transmitted)"]
+    lines = [
+        "JUMPTRACK WARNING CONFIGURATION",
+        "=" * 40,
+        "Altitude unit: not verified (values shown as transmitted)",
+    ]
     for name, info in config["categories"].items():
-        lines.extend([
-            "", name.upper(),
-            f"  Active bank: {info['active_bank'] if info['active_bank'] is not None else 'unknown'}",
-            f"  Pitch:       {info['pitch'] if info['pitch'] is not None else 'unknown'} / 7",
-            f"  Volume:      {info['volume'] if info['volume'] is not None else 'unknown'} / 10",
-            f"  Active thresholds: {info['active_warning_altitudes']}",
-        ])
+        lines.extend(
+            [
+                "",
+                name.upper(),
+                f"  Active bank: {info['active_bank'] if info['active_bank'] is not None else 'unknown'}",
+                f"  Pitch:       {info['pitch'] if info['pitch'] is not None else 'unknown'} / 7",
+                f"  Volume:      {info['volume'] if info['volume'] is not None else 'unknown'} / 10",
+                f"  Active thresholds: {info['active_warning_altitudes']}",
+            ]
+        )
         for bank, altitudes in info["banks"].items():
             marker = " (selected)" if info["active_bank"] == int(bank) else ""
-            lines.append(f"  Bank {bank}{marker}: {altitudes if altitudes is not None else 'not returned'}")
+            lines.append(
+                f"  Bank {bank}{marker}: {altitudes if altitudes is not None else 'not returned'}"
+            )
     if config["battery"]:
         lines.extend(["", f"Battery: {config['battery']}"])
     return "\n".join(lines)
@@ -422,26 +645,44 @@ def save_response(name, content):
 
 def build_parser():
     from jumptrack_cli import add_commands
+
     parser = argparse.ArgumentParser(
         description="JumpTrack BLE client. Put global options before COMMAND.",
-        epilog="Without COMMAND, read device info, jump counter and jump list. Use COMMAND --help for details.")
-    parser.add_argument("--dry-run", action="store_true", help="Preview a subcommand without Bluetooth")
-    parser.add_argument("--allow-destructive", action="store_true", help="Enable explicit erase/reset/counter subcommands")
-    parser.add_argument("--output", type=Path, help="Save a subcommand response to this file")
-    parser.add_argument("--beeps", choices=("on", "off"), help="Set button beeps, preserving other W-40 settings")
-    parser.add_argument("--address", default=ADDRESS, help="BLE address or platform device identifier")
-    parser.add_argument("--profile", type=int, help="Also download the specified jump profile")
-    parser.add_argument("--settings", action="store_true", help="Also read R-00, R-38, R-40, R-41, R-42")
-    parser.add_argument("--warnings", action="store_true", help="Read and display all warning banks, pitch, and volume")
-    parser.add_argument("--debug", action="store_true", help="Print incoming BLE packets as hex")
-    parser.add_argument("--list-devices", action="store_true", help="List JumpTrack-recognized families and verified Python models")
+        epilog="Without COMMAND, read device info, jump counter and jump list. Use COMMAND --help for details.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Preview a subcommand without Bluetooth"
+    )
+    parser.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="Enable explicit erase/reset/counter subcommands",
+    )
+    parser.add_argument(
+        "--output", type=Path, help="Save a subcommand response to this file"
+    )
+    parser.add_argument("--beeps", choices=("on", "off"), help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--address", default=ADDRESS, help="BLE address or platform device identifier"
+    )
+    parser.add_argument("--profile", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--settings", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--warnings", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--debug", action="store_true", help="Print incoming BLE packets as hex"
+    )
+    parser.add_argument("--list-devices", action="store_true", help=argparse.SUPPRESS)
     add_commands(parser)
     return parser
 
 
 async def run_operation(args, op):
-    device = JumpTrack(address=args.address, debug=args.debug,
-                       allow_writes=op.write, allow_destructive=op.destructive)
+    device = JumpTrack(
+        address=args.address,
+        debug=args.debug,
+        allow_writes=op.write,
+        allow_destructive=op.destructive,
+    )
     try:
         await device.connect()
         result = await getattr(device, op.method)(*op.args, **op.kwargs)
@@ -455,14 +696,45 @@ async def run_operation(args, op):
 
 
 async def main(argv=None):
-    from jumptrack_cli import operation, preview
+    from jumptrack_cli import command_tree, operation, preview
+
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.action == "group-help":
+        args.help_parser.print_help()
+        return
+    if args.action == "list-models":
+        if (
+            args.settings
+            or args.warnings
+            or args.profile is not None
+            or args.beeps is not None
+            or args.output is not None
+            or args.allow_destructive
+        ):
+            parser.error(
+                "device list-models is an offline listing; do not combine it with device-operation flags"
+            )
+        print("Recognized families: " + ", ".join(SUPPORTED_DEVICE_FAMILIES))
+        print("Verified Python models: " + ", ".join(VERIFIED_PYTHON_MODELS))
+        return
     legacy_reads = args.settings or args.warnings or args.profile is not None
-    if args.action == 'constants':
-        if legacy_reads or args.beeps is not None or args.list_devices or args.output is not None or args.allow_destructive:
-            parser.error("constants is an offline listing; do not combine it with device-operation flags")
+    if args.action in ("constants", "tree"):
+        if (
+            legacy_reads
+            or args.beeps is not None
+            or args.list_devices
+            or args.output is not None
+            or args.allow_destructive
+        ):
+            parser.error(
+                f"{args.action} is an offline listing; do not combine it with device-operation flags"
+            )
+        if args.action == "tree":
+            print(command_tree(parser))
+            return
         from java_uart_command_builder import CONSTANTS
+
         print(json.dumps(CONSTANTS, indent=2))
         return
     if args.action:
@@ -477,12 +749,18 @@ async def main(argv=None):
             print("null" if command is None else command)
             return
         if command is None:
-            parser.error("Java master returned null for these inputs; no command was sent")
+            parser.error(
+                "Java master returned null for these inputs; no command was sent"
+            )
         if op.destructive and not args.allow_destructive:
             parser.error("This command requires --allow-destructive before COMMAND")
+        if not args.address:
+            parser.error(
+                "Set --address, JUMPTRACK_ADDRESS, or .jumptrack-address before connecting"
+            )
         try:
             await run_operation(args, op)
-        except (TimeoutError, ConnectionError, ValueError, RuntimeError, OSError, BleakError) as exc:
+        except (ValueError, RuntimeError, OSError, BleakError) as exc:
             detail = str(exc)
             if isinstance(exc, TimeoutError) and (op.write or op.destructive):
                 detail += "\nThe write may have applied; no retry was sent. Check the device before retrying."
@@ -501,7 +779,9 @@ async def main(argv=None):
 
     if not args.address:
         parser.error("Set --address or JUMPTRACK_ADDRESS before connecting")
-    device = JumpTrack(address=args.address, debug=args.debug, allow_writes=args.beeps is not None)
+    device = JumpTrack(
+        address=args.address, debug=args.debug, allow_writes=args.beeps is not None
+    )
     try:
         await device.connect()
         if args.beeps is not None:
@@ -514,18 +794,27 @@ async def main(argv=None):
             ("JUMP LIST", "jump_list.txt", device.get_jump_list),
         ]
         if args.warnings and not args.settings:
-            commands.append(("ALL WARNINGS", "all_warnings.txt", device.get_all_warnings))
+            commands.append(
+                ("ALL WARNINGS", "all_warnings.txt", device.get_all_warnings)
+            )
         if args.settings:
-            commands.extend([
-                ("ALL WARNINGS", "all_warnings.txt", device.get_all_warnings),
-                ("SPEED UNITS", "speed_uom.txt", device.get_speed_uom),
-                ("SETTINGS R-40", "settings_40.txt", device.get_settings_40),
-                ("SETTINGS R-41", "settings_41.txt", device.get_settings_41),
-                ("SETTINGS R-42", "settings_42.txt", device.get_settings_42),
-            ])
+            commands.extend(
+                [
+                    ("ALL WARNINGS", "all_warnings.txt", device.get_all_warnings),
+                    ("SPEED UNITS", "speed_uom.txt", device.get_speed_uom),
+                    ("SETTINGS R-40", "settings_40.txt", device.get_settings_40),
+                    ("SETTINGS R-41", "settings_41.txt", device.get_settings_41),
+                    ("SETTINGS R-42", "settings_42.txt", device.get_settings_42),
+                ]
+            )
         if args.profile is not None:
-            commands.append((f"JUMP {args.profile} PROFILE", f"jump_{args.profile:05d}_profile.txt",
-                             lambda: device.get_jump_profile_hex(args.profile)))
+            commands.append(
+                (
+                    f"JUMP {args.profile} PROFILE",
+                    f"jump_{args.profile:05d}_profile.txt",
+                    lambda: device.get_jump_profile_hex(args.profile),
+                )
+            )
         for title, filename, func in commands:
             print(f"\n{'=' * 60}\n{title}\n{'=' * 60}")
             try:
@@ -541,8 +830,13 @@ async def main(argv=None):
                     summary = format_warning_configuration(parsed)
                     print("\n" + summary)
                     save_response("warning_configuration.txt", summary + "\n")
-                    structured = {key: value for key, value in parsed.items() if key != "raw"}
-                    save_response("warning_configuration.json", json.dumps(structured, indent=2) + "\n")
+                    structured = {
+                        key: value for key, value in parsed.items() if key != "raw"
+                    }
+                    save_response(
+                        "warning_configuration.json",
+                        json.dumps(structured, indent=2) + "\n",
+                    )
                 except ValueError as exc:
                     print(f"WARNING: Could not parse R-00: {exc}")
             if filename == "jump_list.txt":
