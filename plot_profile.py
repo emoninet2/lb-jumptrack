@@ -1,88 +1,25 @@
-"""Read one JumpTrack hex profile and plot raw words or an explicitly assumed pressure interpretation.
+"""Read and plot JumpTrack profiles with app-derived altitude and vertical speed.
 
 Offline: .venv/bin/python plot_profile.py --file jumptrack_data/jump_00035_profile.txt
 Live:    .venv/bin/python plot_profile.py --jump 35
 
-This is a manual read-only test, not an automatic Bluetooth unit test.
-The observed layout and pressure interpretation are experimental. Unit conversion
-requires an explicit scale and reference pressure; neither comes from the Java master.
+Default decoding follows JumpTrack Android 1.1.64. CRC and byte-count metadata are verified.
+Use --raw for raw words or explicit pressure options for the older experimental model.
 """
 
 import argparse
 import asyncio
 import csv
 import json
-import re
 import sys
 from pathlib import Path
 
-
-def parse_profile(raw, *, expected_profile_count=None, strict_count=False):
-    """Parse the layout observed in the saved PROTRACK 3 firmware 01.04 reply.
-
-    Observed layout: command echo, 16 decimal header lines, then hex words,
-    checksum metadata, EOF. Preserve header fields without assigning meanings.
-    No checksum verification is performed.
-    """
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    if not lines or not re.fullmatch(r"Get Hex Profile in Jump -?[0-9]+", lines[0]):
-        raise ValueError("Expected a Get Hex Profile in Jump response")
-    if lines[-1] != "EOF":
-        raise ValueError("Incomplete profile response: missing final EOF")
-    checksum_start = next(
-        (i for i, line in enumerate(lines) if line.startswith("CheckSum.")), None
-    )
-    if checksum_start is None:
-        raise ValueError("Missing checksum metadata boundary")
-    header = lines[1:17]
-    if len(header) != 16 or any(not re.fullmatch(r"[0-9]+", field) for field in header):
-        raise ValueError("Unrecognized profile header: expected 16 decimal fields")
-    requested_jump = int(lines[0].split()[-1])
-    if int(header[0]) != requested_jump:
-        raise ValueError("Echoed jump number does not match the profile header")
-    payload_lines = lines[17:checksum_start]
-    if not payload_lines:
-        raise ValueError("Profile contains no hex data")
-    if any(not re.fullmatch(r"(?:[0-9A-Fa-f]{4})+", line) for line in payload_lines):
-        raise ValueError("Malformed hex payload: expected groups of four hex digits")
-    encoded = "".join(payload_lines)
-    words = [int(encoded[i : i + 4], 16) for i in range(0, len(encoded), 4)]
-    declared_count = int(header[-1])
-    decoded_count = len(words)
-    warnings = []
-    matches_observed = declared_count == decoded_count + 1
-    if not matches_observed:
-        warnings.append(
-            f"Profile count mismatch: header={declared_count}, decoded={decoded_count}; "
-            "observed firmware layout expects header = decoded + 1. "
-            "Possible missing/extra data or a different profile layout."
-        )
-    if expected_profile_count is not None:
-        if (
-            isinstance(expected_profile_count, bool)
-            or not isinstance(expected_profile_count, int)
-            or expected_profile_count < 0
-        ):
-            raise ValueError("expected_profile_count must be a nonnegative integer")
-        if expected_profile_count != declared_count:
-            warnings.append(
-                f"Jump-list/header count mismatch: list={expected_profile_count}, header={declared_count}"
-            )
-    if strict_count and warnings:
-        raise ValueError("; ".join(warnings))
-    return {
-        "profile_count_field": declared_count,
-        "decoded_word_count": decoded_count,
-        "count_difference": declared_count - decoded_count,
-        "count_matches_observed_layout": matches_observed,
-        "expected_profile_count": expected_profile_count,
-        "validation_warnings": warnings,
-        "jump_number": requested_jump,
-        "header_decimal_fields": [int(field) for field in header],
-        "raw_words": words,
-        "checksum_metadata": lines[checksum_start:-1],
-        "interpretation": "Experimental 16-bit hex words as printed; units and sample period unknown",
-    }
+from profile_decoder import (
+    decode_profile,
+    format_profile_summary,
+    parse_profile,
+    profile_csv,
+)
 
 
 async def download_profile(jump, address, timeout):
@@ -154,7 +91,9 @@ def convert_profile(
     }
 
 
-def save_plot(profile, destination, sample_interval=None, show=False, converted=None):
+def save_plot(
+    profile, destination, sample_interval=None, show=False, converted=None, decoded=None
+):
     import matplotlib
 
     if not show:
@@ -164,16 +103,19 @@ def save_plot(profile, destination, sample_interval=None, show=False, converted=
     words = profile["raw_words"]
     x = list(range(len(words)))
     label = "Sample index (sampling interval unknown)"
-    if sample_interval is not None:
+    if decoded:
+        x = [sample["time_seconds"] for sample in decoded["samples"]]
+        label = "Time (seconds; JumpTrack chart origin)"
+    elif sample_interval is not None:
         x = [i * sample_interval for i in x]
         label = f"Elapsed seconds (user-supplied interval: {sample_interval:g} s)"
     with plt.rc_context(
         {"font.size": 11, "axes.spines.top": False, "axes.spines.right": False}
     ):
         fig, axes = plt.subplots(
-            3 if converted else 1,
+            3 if converted or decoded else 1,
             1,
-            figsize=(11, 10 if converted else 5.5),
+            figsize=(11, 10 if converted or decoded else 5.5),
             sharex=True,
             layout="constrained",
             squeeze=False,
@@ -184,7 +126,33 @@ def save_plot(profile, destination, sample_interval=None, show=False, converted=
             f"Jump {profile['jump_number']} — raw profile", loc="left", weight="bold"
         )
         axes[0].set_ylabel("Raw 16-bit value")
-        if converted:
+        if decoded:
+            axes[1].plot(
+                x, [v["altitude"] for v in decoded["samples"]], color="#13866c"
+            )
+            axes[1].axhline(
+                decoded["summary"]["deployment_altitude"],
+                color="#8a4f9e",
+                linestyle="--",
+                label="Recorded deployment altitude",
+            )
+            axes[1].legend()
+            axes[1].set_ylabel(f"Altitude ({decoded['altitude_unit']})")
+            available = [
+                v for v in decoded["samples"] if v["vertical_speed"] is not None
+            ]
+            axes[2].plot(
+                [v["time_seconds"] for v in available],
+                [v["vertical_speed"] for v in available],
+                color="#a46118",
+            )
+            axes[2].set_ylabel(f"Vertical speed ({decoded['speed_unit']})")
+            axes[2].set_title(
+                "Positive descent; app-derived 3/6-second speed windows",
+                loc="left",
+                fontsize=10,
+            )
+        elif converted:
             axes[1].plot(x, converted["pressure_hpa"], color="#a46118", linewidth=1.6)
             axes[1].set_ylabel("Assumed pressure (hPa)")
             axes[1].set_title(
@@ -208,7 +176,7 @@ def save_plot(profile, destination, sample_interval=None, show=False, converted=
         for ax in axes:
             ax.grid(alpha=0.2)
         fig.suptitle(
-            f"{len(words):,} words • experimental decoding • checksum not verified",
+            f"{len(words):,} words • {'JumpTrack 1.1.64 decoder' if decoded else 'experimental interpretation'} • checksum verified",
             fontsize=10,
             color="#555555",
         )
@@ -233,80 +201,60 @@ def main(argv=None):
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
-        "--file",
-        type=Path,
-        help="Use a previously downloaded text profile; no Bluetooth",
+        "--file", type=Path, help="Use a saved profile without Bluetooth"
     )
-    source.add_argument(
-        "--jump", type=int, help="Download this one jump profile (read-only)"
-    )
-    parser.add_argument("--address", help="Override BLE address for live reads")
-    parser.add_argument(
-        "--timeout",
-        type=positive_float,
-        default=90,
-        help="Live response timeout in seconds (default: 90)",
-    )
+    source.add_argument("--jump", type=int, help="Download one profile (read-only)")
+    parser.add_argument("--address", help="BLE identifier for live reads")
+    parser.add_argument("--timeout", type=positive_float, default=90)
     parser.add_argument(
         "--output-dir", type=Path, default=Path("jumptrack_data/profile_plots")
     )
     parser.add_argument(
+        "--units", choices=("feet", "meters"), help="Altitude units (app default: feet)"
+    )
+    parser.add_argument(
+        "--speed-unit", choices=("mph", "kmh", "fps", "mps"), default="mph"
+    )
+    parser.add_argument(
+        "--raw", action="store_true", help="Plot raw words without app decoding"
+    )
+    parser.add_argument(
         "--sample-interval",
         type=positive_float,
-        help="Known seconds between samples; otherwise use sample index",
+        help="Override timing for raw/experimental plots only",
     )
     parser.add_argument(
         "--pressure-scale",
         type=positive_float,
-        help="EXPERIMENTAL assumed hPa per raw count (e.g. 0.1)",
+        help="Select legacy experimental pressure model with this hPa/count scale",
     )
     parser.add_argument(
         "--reference-pressure",
         type=positive_float,
-        help="EXPERIMENTAL reference pressure in hPa (required with --pressure-scale)",
+        help="Reference hPa for legacy experimental model",
     )
-    parser.add_argument(
-        "--units",
-        choices=("meters", "feet"),
-        help="Estimated height unit (requires both pressure options)",
-    )
-    parser.add_argument(
-        "--strict-count",
-        action="store_true",
-        help="Refuse profiles with count mismatches instead of warning",
-    )
-    parser.add_argument(
-        "--expected-count",
-        type=int,
-        help="Optional count field from the jump list; compare against profile header",
-    )
-    parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Also display an interactive plot window if a GUI backend is available",
-    )
+    parser.add_argument("--strict-count", action="store_true")
+    parser.add_argument("--expected-count", type=int)
+    parser.add_argument("--show", action="store_true")
     args = parser.parse_args(argv)
     if args.expected_count is not None and args.expected_count < 0:
         parser.error("--expected-count must be nonnegative")
     if args.jump is not None and not -2147483648 <= args.jump <= 2147483647:
         parser.error("--jump must fit a signed Java int")
-    if (args.pressure_scale is None) != (args.reference_pressure is None):
+    experimental = args.pressure_scale is not None
+    if experimental != (args.reference_pressure is not None):
         parser.error(
             "--pressure-scale and --reference-pressure must be supplied together"
         )
-    if args.units is not None and args.pressure_scale is None:
+    if args.raw and (experimental or args.units is not None):
+        parser.error("--raw cannot be combined with pressure conversion or --units")
+    if args.sample_interval is not None and not (args.raw or experimental):
         parser.error(
-            "--units requires explicit --pressure-scale and --reference-pressure assumptions"
+            "App decoding uses 0.25-second timing; --sample-interval applies only to --raw or experimental conversion"
         )
     if args.file is not None and args.address:
         parser.error("--address applies only to --jump")
     try:
-        import importlib.util
-
-        if importlib.util.find_spec("matplotlib") is None:
-            parser.error(
-                "Install plotting dependency: .venv/bin/python -m pip install matplotlib"
-            )
         raw = (
             args.file.read_text(encoding="utf-8")
             if args.file is not None
@@ -318,87 +266,102 @@ def main(argv=None):
             strict_count=args.strict_count,
         )
         for warning in profile["validation_warnings"]:
-            print(f"WARNING: {warning}", file=sys.stderr)
+            print("WARNING: " + warning, file=sys.stderr)
         converted = None
-        if args.pressure_scale is not None:
+        decoded = None
+        if experimental:
             converted = convert_profile(
                 profile,
                 pressure_scale_hpa=args.pressure_scale,
                 reference_pressure_hpa=args.reference_pressure,
                 altitude_unit=args.units or "meters",
             )
+        elif not args.raw:
+            decoded = decode_profile(
+                profile, altitude_unit=args.units or "feet", speed_unit=args.speed_unit
+            )
         directory = args.output_dir
-        directory.mkdir(parents=True, exist_ok=True)
         prefix = directory / f"jump_{profile['jump_number']:05d}"
+        tag = (
+            "_" + decoded["altitude_unit"] + "_" + decoded["speed_unit"]
+            if decoded
+            else "_estimated_" + converted["altitude_unit"]
+            if converted
+            else ""
+        )
         raw_path = prefix.with_name(prefix.name + "_profile.txt")
-        # Never rewrite the input file when output and source happen to match.
+        csv_path = prefix.with_name(prefix.name + tag + "_samples.csv")
+        metadata_path = prefix.with_name(prefix.name + tag + "_metadata.json")
+        plot_path = prefix.with_name(prefix.name + tag + ".png")
+        if args.file is not None and args.file.resolve() in {
+            p.resolve() for p in (csv_path, metadata_path, plot_path)
+        }:
+            raise ValueError(
+                "Output would overwrite the source profile; choose another --output-dir"
+            )
+        directory.mkdir(parents=True, exist_ok=True)
         if args.file is None or raw_path.resolve() != args.file.resolve():
             raw_path.write_text(raw, encoding="utf-8")
-        tag = "_estimated_" + converted["altitude_unit"] if converted else ""
-        csv_path = prefix.with_name(prefix.name + tag + "_samples.csv")
-        with csv_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(
-                ["sample_index", "raw_value", "hex_word"]
-                + (["elapsed_seconds"] if args.sample_interval is not None else [])
-                + (
-                    [
-                        "assumed_pressure_hpa",
-                        "estimated_height_m",
-                        "estimated_height_" + converted["altitude_unit"],
-                    ]
-                    if converted
-                    else []
-                )
-            )
-            for i, value in enumerate(profile["raw_words"]):
-                writer.writerow(
-                    [i, value, f"{value:04X}"]
-                    + (
-                        [i * args.sample_interval]
-                        if args.sample_interval is not None
-                        else []
-                    )
-                    + (
-                        [
-                            converted["pressure_hpa"][i],
-                            converted["estimated_height_m"][i],
-                            converted["estimated_height"][i],
-                        ]
-                        if converted
-                        else []
-                    )
-                )
         metadata = {key: value for key, value in profile.items() if key != "raw_words"}
-        metadata.update(
-            word_count=len(profile["raw_words"]),
-            sample_interval_seconds=args.sample_interval,
-        )
-        if converted:
-            metadata["conversion"] = {
-                key: value
-                for key, value in converted.items()
-                if key not in ("pressure_hpa", "estimated_height_m", "estimated_height")
+        metadata["sample_interval_seconds"] = 0.25 if decoded else args.sample_interval
+        if decoded:
+            csv_path.write_text(profile_csv(decoded) + "\n", encoding="utf-8")
+            metadata["decoded"] = {
+                key: value for key, value in decoded.items() if key != "samples"
             }
-        prefix.with_name(prefix.name + tag + "_metadata.json").write_text(
-            json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
+        else:
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                columns = ["sample_index", "raw_value", "hex_word"]
+                if args.sample_interval is not None:
+                    columns.append("elapsed_seconds")
+                if converted:
+                    columns.extend(
+                        [
+                            "assumed_pressure_hpa",
+                            "estimated_height_m",
+                            "estimated_height_" + converted["altitude_unit"],
+                        ]
+                    )
+                writer.writerow(columns)
+                for index, value in enumerate(profile["raw_words"]):
+                    row = [index, value, f"{value:04X}"]
+                    if args.sample_interval is not None:
+                        row.append(index * args.sample_interval)
+                    if converted:
+                        row.extend(
+                            [
+                                converted["pressure_hpa"][index],
+                                converted["estimated_height_m"][index],
+                                converted["estimated_height"][index],
+                            ]
+                        )
+                    writer.writerow(row)
+            if converted:
+                metadata["conversion"] = {
+                    key: value
+                    for key, value in converted.items()
+                    if key
+                    not in ("pressure_hpa", "estimated_height_m", "estimated_height")
+                }
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2, allow_nan=False) + "\n", encoding="utf-8"
         )
-        plot_path = prefix.with_name(prefix.name + tag + ".png")
-        save_plot(profile, plot_path, args.sample_interval, args.show, converted)
-        print(f"Jump {profile['jump_number']}: {len(profile['raw_words'])} raw words")
-        print(
-            f"Profile count field: {profile['profile_count_field']}; decoded + 1 check: "
-            f"{'PASS' if profile['count_matches_observed_layout'] else 'MISMATCH'}"
+        save_plot(
+            profile, plot_path, args.sample_interval, args.show, converted, decoded
         )
-        print(
-            "Sample period and encoding are unverified; raw data and assumptions are preserved."
-        )
-        if converted:
+        if decoded:
+            print(format_profile_summary(decoded))
+        else:
             print(
-                f"EXPERIMENTAL estimated height: {converted['estimated_height'][0]:.1f} -> {converted['estimated_height'][-1]:.1f} {converted['altitude_unit']}"
+                f"Jump {profile['jump_number']}: {len(profile['raw_words'])} raw words; checksum verified"
             )
-        print(f"Plot: {plot_path.resolve()}\nCSV:  {csv_path.resolve()}")
-    except (OSError, ValueError, TimeoutError, RuntimeError) as exc:
+        print(
+            f"Plot: {plot_path.resolve()}\nCSV: {csv_path.resolve()}\nMetadata: {metadata_path.resolve()}"
+        )
+    except ImportError as exc:
+        parser.exit(1, f"Install plotting dependencies from requirements.txt: {exc}\n")
+    except (OSError, ValueError, RuntimeError) as exc:
         parser.exit(1, f"Error: {exc}\n")
 
 

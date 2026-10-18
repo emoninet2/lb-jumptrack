@@ -1,82 +1,145 @@
-# Raw profile and experimental units
+# Profile parsing, altitude and vertical speed
 
-There is no confirmed unit-bearing profile decoder in the supplied Java master. It builds `Get Hex Profile in Jump ...`; it does not define a text/altitude variant, the response header, the sample interval, or the sample units. The implementation therefore offers two distinct interpretations without changing the Java port:
+`profile_decoder.py` ports the profile conversion found in the recovered
+JumpTrack Android 1.1.64 APK. It is independent of Bluetooth and Matplotlib.
+`plot_profile.parse_profile` remains a compatible import of the shared parser.
+The original downloaded text and header integers are preserved.
 
-- Raw: preserve and plot four-digit hex words as unsigned numbers.
-- Experimental units: explicitly assume a pressure scale, then estimate height relative to a chosen reference pressure. This is computed in Python, not returned as altitude by the device.
+## Wire layout and header
 
-## Repeat the plot from saved jump 35
+A supported response consists of the command echo, 16 decimal header tokens,
+four-digit hex words, checksum metadata and EOF. CRC or byte-count mismatches, incomplete responses, malformed
+payloads and mismatched echo/header jump numbers are rejected. Physical units
+come from the recovered app's `DataProcessor`, `RawBLEJumpData`, `JumpUtils` and
+`MeasurementUtils` classes; see [APK audit](APK_AUDIT.md).
 
-From the LB folder:
+| Zero-based field | Meaning | Stored units |
+| --- | --- | --- |
+| 0 | Jump number | Integer |
+| 1 | Ground pressure | Divide by 10 for hPa |
+| 2 | Temperature | Divide by 10 for Celsius |
+| 3 | Exit altitude | Feet |
+| 4 | Recorded deployment altitude | Feet |
+| 5 | Freefall duration | Seconds |
+| 6–10 | Month, day, year, hour, minute | Device local wall-clock |
+| 11 | Average freefall TAS | mph |
+| 12 | Average canopy TAS | mph |
+| 13 | Maximum freefall TAS | mph |
+| 14 | Maximum canopy TAS | mph |
+| 15 | Observed profile-count field | Inclusive convention unconfirmed |
 
-```bash
-.venv/bin/python plot_profile.py --file jumptrack_data/jump_00035_profile.txt
-.venv/bin/python plot_profile.py --file jumptrack_data/jump_00035_profile.txt --pressure-scale 0.1 --reference-pressure 1007 --units feet
-.venv/bin/python plot_profile.py --file jumptrack_data/jump_00035_profile.txt --pressure-scale 0.1 --reference-pressure 1007 --units meters
-```
+Negative temperature values are supported. Decoding rejects invalid dates,
+nonpositive ground pressure, zero/invalid pressure samples and unsupported units.
+Those checks prevent silently producing a plausible altitude for invalid input.
+The stored deployment altitude is exposed directly; no deployment event is
+inferred from the altitude/speed curve.
 
-The saved profile is sufficient; Bluetooth is not needed. To read a new profile first, replace `--file ...` with `--jump 35` while the device is available. This sends only the master's hex-profile read command. `--address` and `--timeout` override the connection identifier and response timeout.
+## App-derived conversion
 
-The pressure assumption is `pressure_hpa = raw_word * 0.1`. The 1007 hPa reference is an explicitly chosen example: the second observed header field is 10070 and the final raw samples are near 10069. This agreement makes the hypothesis plausible, but it does not establish the field meanings, pressure scale, or correct altitude algorithm. No conversion is enabled silently. Both pressure options are required for unit estimates.
-
-For jump 35 these assumptions produce approximately 13,857.5 feet at the first word and 2.7 feet at the last. This is height relative to the model height at the selected reference pressure, **not verified device altitude, measured AGL, or elevation above sea level**. Weather, temperature, the reference choice and the unconfirmed sample encoding affect the result.
-
-## Conversion model
-
-The calculation inverts NASA's [metric troposphere curve fit](https://www.grc.nasa.gov/www/k-12/airplane/atmosmet.html). Pressure must be in kPa in this equation:
+For ground pressure `g` in hPa and raw hex word `w`:
 
 ```text
-T = 15.04 - 0.00649*h
-p_kPa = 101.29 * ((T + 273.1) / 288.08)^5.256
-h_m = (288.14 - 288.08 * (p_kPa / 101.29)^(1/5.256)) / 0.00649
-estimated_height_m = h_m(sample_pressure) - h_m(reference_pressure)
-feet = meters / 0.3048
+P(p) = (p / 1013.25) ** 0.190263
+altitude_ft = (P(g) - P(w / 10)) * 44330.8 * 3.2808
+altitude_m = altitude_ft * 0.3048
+time_seconds = -2 + sample_index * 0.25
 ```
 
-The code rejects zero or negative pressures, nonfinite parameters, and pressures implying model heights above the troposphere's 11 km boundary. The atmospheric model is a separate extension, not copied from the Java master.
+The -2-second origin and 0.25-second interval reproduce the app's chart axis;
+they do not independently establish the physical exit instant.
 
-The horizontal axis remains sample index. Supply `--sample-interval SECONDS` only when the real interval is known; it is not inferred from an unidentified header field. No speed is derived.
+Speed is available only when `sample_index > 28`. At or below the recorded
+deployment altitude, compare with index minus 12 over 3 seconds. Above it,
+compare with index minus 24 over 6 seconds:
 
-## Files and API
+```text
+speed_mph = ((previous_altitude_ft - current_altitude_ft) / window_seconds) * 0.681818
+kmh = mph * 1.609344
+fps = mph * 1.46667
+mps = mph * 0.44704
+```
 
-Outputs default to `jumptrack_data/profile_plots/`:
+These constants intentionally match the app. Descending motion is positive;
+ascending motion may be negative. Samples 0–28 have null speed/window in JSON
+and blank cells in CSV. The app's choice of window creates a possible change in
+smoothing at the recorded deployment altitude. No samples are added or padded.
 
-- `jump_00035.png`: raw-only chart.
-- `jump_00035_estimated_feet.png`: raw, assumed pressure and estimated height panels.
-- `jump_00035_estimated_feet_samples.csv`: raw values, hex words, assumed hPa, estimated meters and estimated feet.
-- `jump_00035_estimated_feet_metadata.json`: untouched numeric header fields, checksum metadata and explicit conversion assumptions.
+Named header summaries use the app's integer rounding (ties toward positive
+infinity). Calculations retain double precision; Android chart points are
+converted to floats, so plotted display precision can differ slightly. The
+derived speed series is separate from the four stored TAS summary values.
+Neither implements a TAS/SAS mode switch or a new SAS conversion.
+Human-readable speed labels are neutral ("stored freefall/canopy speed").
+JSON retains the APK-derived `tas` names for provenance and compatibility;
+those names do not confirm TAS recording. `recording_speed_mode` is null: the app export has no identified mode field,
+and the decoder does not infer recording mode from missing or nonzero TAS values.
 
-Unit-specific filenames keep raw and estimated plots separate. Existing matching output filenames are overwritten. Use `--output-dir PATH` to choose another folder and `--show` to display a window if a GUI backend is available. The source input file is not rewritten.
+## CLI and output
+
+```bash
+jt logbook profile 33 --format summary
+jt logbook profile 33 --format text --units meters --speed-unit kmh
+jt --output profile.json logbook profile 33 --format json
+jt --output samples.csv logbook profile 33 --format csv
+jt logbook profile 33 --file jumptrack_data/jump_00033_profile.txt --format summary
+```
+
+The default format remains `hex`. `summary` shows named header values and
+warnings; `text` appends the sample CSV; `json` contains headers, summaries,
+metadata and all samples. CSV columns include explicit units. `--file` never
+connects to Bluetooth, checks the requested jump and refuses to overwrite the
+source file via `--output`.
+
+The plotter defaults to three panels (raw, altitude, speed) and marks deployment
+altitude. Outputs include `jump_00033_feet_mph.png`, corresponding `_samples.csv`
+and `_metadata.json`, plus the raw `_profile.txt`. Use `--units meters` and
+`--speed-unit kmh` for another view. Matching output names are overwritten;
+source files are preserved, including when they would collide with an export.
+
+## Python API
 
 ```python
 from pathlib import Path
-from plot_profile import parse_profile, convert_profile
+from profile_decoder import parse_profile, decode_profile
 
-profile = parse_profile(Path("jumptrack_data/jump_00035_profile.txt").read_text())
-raw = profile["raw_words"]
-converted = convert_profile(
-    profile,
-    pressure_scale_hpa=0.1,
-    reference_pressure_hpa=1007,
-    altitude_unit="feet",
-)
-print(raw[0], converted["pressure_hpa"][0], converted["estimated_height"][0])
+profile = parse_profile(Path("jumptrack_data/jump_00033_profile.txt").read_text())
+decoded = decode_profile(profile, altitude_unit="feet", speed_unit="mph")
+print(decoded["summary"]["deployment_altitude"])
+print(decoded["samples"][29]["vertical_speed"])
+# Within an async function, with a connected JumpTrack client:
+# decoded = await device.get_jump_profile(33, altitude_unit='meters', speed_unit='kmh')
 ```
 
-The decoder currently assumes the observed 16-decimal-field header and four-digit hex word layout. It preserves every header field without assigning undocumented meanings. The saved response yields 1,216 words; the last header field is 1217, consistent with the count evidence below. Its exact inclusive convention remains unknown. Checksums remain unverified. An APK response parser or protocol specification is still needed for confirmed units and sample timing.
+## Count and checksum validation
 
-## Additional profile-count evidence
+The observed count rule is header field 15 = decoded words + 1. Jump-list
+`profile_count_field` (also retained as `unknown_1`) matches it in three stored
+jumps; see [count evidence](PROFILE_COUNT_COMPARISON.md). A mismatch produces
+`validation_warnings`; `strict_count=True` or plotter `--strict-count` rejects it.
+An optional expected count compares jump list and header. No data is trimmed,
+added or padded to force a match.
 
-Live reads of jumps 33 and 34 confirmed the same relationship as jump 35: jump-list unknown_1 equals the final numeric header field and is one greater than the decoded raw-word count (1274/1273, 1393/1392, 1217/1216). A count/length interpretation is strongly supported; its exact inclusive convention is not confirmed. See PROFILE_COUNT_COMPARISON.md.
+Structural count validation and wire integrity are separate checks. Profiles
+require valid CRC-16/XMODEM and byte-count metadata; damaged or incomplete
+responses are rejected before decoding. LF-normalized saved files and leading
+empty transport-framing lines are normalized explicitly. Raw captures are not
+rewritten. See [integrity details](ACC_AND_INTEGRITY.md). App-derived numerical
+parity is tested with an optional Java oracle using the private recovered source.
+Independent hardware/physical-altitude verification remains pending.
 
-## Using the profile count
+## Raw and legacy experimental views
 
-The API now exposes `profile_count_field` in parsed jump-list rows. `unknown_1` remains an alias for compatibility; `unknown_2` is unchanged. This field matches the final profile header field in all three tested jumps. The exact inclusive counting convention remains unverified.
-
-`parse_profile()` reports `profile_count_field`, `decoded_word_count`, `count_difference`, `count_matches_observed_layout`, and `validation_warnings`. The observed firmware rule is header count = decoded words + 1. A mismatch warns about possible missing/extra data or a different layout; it is not proof of corruption. This is a structural check, not a checksum verification.
+`plot_profile.py --raw` plots raw words against sample index. An explicit
+`--sample-interval` is allowed only for raw/experimental plots. Supplying both
+`--pressure-scale` and `--reference-pressure` selects the older experimental
+NASA troposphere model, kept separate from the app port:
 
 ```bash
-.venv/bin/python plot_profile.py --file jumptrack_data/jump_00035_profile.txt --strict-count --expected-count 1217
+python plot_profile.py --file profile.txt --raw
+python plot_profile.py --file profile.txt --pressure-scale 0.1 --reference-pressure 1007 --units meters
 ```
 
-`--expected-count` optionally cross-checks the jump-list field against the profile header. `--strict-count` refuses to plot/export when either check fails; otherwise mismatches generate warnings and are stored in metadata JSON. No samples are invented, removed or padded. The field does not establish the sample interval, altitude units, or duration.
+`convert_profile()` retains that API and its explicit assumptions and 11 km
+model limit. Its formula comes from [NASA's troposphere curve](https://www.grc.nasa.gov/www/k-12/airplane/atmosmet.html);
+it is not the default JumpTrack decoder. No velocity is derived for that legacy
+experimental view.

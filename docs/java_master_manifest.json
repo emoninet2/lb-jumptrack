@@ -1,5 +1,5 @@
 {
-  "master_sha256": "b68c90a5d30d2dc536a352fcb8c584f83fb4117519c6d0d2fac4a597358e76f5",
+  "master_sha256": "281458d5dc3df365e62761230c3a566b2d65ddac28bf3ba7ab35f9df13bfb873",
   "constants": {
     "READ_ALL_WARNINGS_COMMAND": "R-00",
     "READ_JUMPS_LIST_COMMAND": "Get New Jump List",

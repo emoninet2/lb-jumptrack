@@ -11,8 +11,8 @@ jumptrack.py
 │   └── power-off — Power off the device
 ├── logbook — Jump records and accumulated totals
 │   ├── list — Read jump list
-│   ├── profile — Read a hex jump profile
-│   ├── acc — Read ACC data in hex or text
+│   ├── profile — Read a jump profile (raw or decoded)
+│   ├── acc — Read ACC data (raw or decoded)
 │   └── totals — Read or replace accumulated logbook totals
 │       ├── jumps — Total jump count
 │       │   ├── get — Read jump counter

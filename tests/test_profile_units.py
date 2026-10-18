@@ -65,9 +65,9 @@ class ProfileUnitsTests(unittest.TestCase):
                 {"raw_words": [0]}, pressure_scale_hpa=0.1, reference_pressure_hpa=1000
             )
 
-    def test_units_require_explicit_assumptions_before_reading(self):
+    def test_legacy_conversion_requires_both_assumptions_before_reading(self):
         for args in [
-            ["--file", "nonexistent", "--units", "feet"],
+            ["--file", "nonexistent", "--reference-pressure", "1000"],
             ["--file", "nonexistent", "--pressure-scale", "0.1"],
         ]:
             with (

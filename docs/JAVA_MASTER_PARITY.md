@@ -1,10 +1,25 @@
 # Java master parity audit
 
-This records the historical audit against the private `UARTCommandBuilder.java` reference. The reference is not distributed and is absent from this checkout. Current tests use saved signatures; source-hash and Java-execution checks skip without it. The audit did not modify the source.
+This records the historical audit against the private `UARTCommandBuilder.java` reference. The reference is not distributed. It was restored locally from the user-supplied XAPK on 2026-10-18; source-hash and Java-execution checks still skip on checkouts without the private reference/JDK. The audit did not modify the source.
 
 SHA-256 before and after this audit:
 
 `b68c90a5d30d2dc536a352fcb8c584f83fb4117519c6d0d2fac4a597358e76f5`
+
+## Recovered reference: JumpTrack 1.1.64
+
+On 2026-10-18 the user-supplied XAPK was unpacked and the builder reconstructed
+from `classes9.dex` with JADX 1.5.6. This is decompiled Kotlin bytecode, not the
+original author-written Java/Kotlin source. The recovered file is stored locally
+as `UARTCommandBuilder.java`, which remains ignored by Git.
+
+Current reference SHA-256: `281458d5dc3df365e62761230c3a566b2d65ddac28bf3ba7ab35f9df13bfb873`.
+
+The fingerprint differs from the historical extraction above. All 40 public
+signatures (38 unique method names) match the saved manifest, and execution of
+all 663 oracle cases matched the Python implementation. The current manifest and
+source-hash test pin this recovered artifact. See [APK audit](APK_AUDIT.md) for
+retrieval commands and the newly identified profile decoder outside the builder.
 
 ## Result
 

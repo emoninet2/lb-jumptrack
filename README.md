@@ -1,7 +1,7 @@
 # JumpTrack Python
 
 Unofficial BLE UART client based on an extracted Android `UARTCommandBuilder.java`.
-It provides grouped CLI commands, a Python API, and an experimental profile plotter.
+It provides grouped CLI commands, a Python API, and app-derived profile and ACC decoders and plotters.
 PROTRACK 3 is the tested model; support for other device families is unverified.
 
 ## Setup
@@ -89,8 +89,61 @@ jt logbook totals freefall-time set 12 34 56
 
 Profile and ACC response timeouts default to 90 seconds; overrides accept
 1–3600 seconds. Jump numbers, ACC fields and total freefall-time fields accept
-signed Java integers. Their exact firmware limits and ACC interpretation remain
-unverified. The freefall-time command replaces the accumulated total.
+signed Java integers. Exact firmware limits remain unverified; hex ACC scaling
+and timing now follow the recovered app source. The freefall-time command replaces the accumulated total.
+
+### Decoded profiles and deployment altitude
+
+The profile header already includes the recorded deployment altitude. Request a
+readable summary, including exit/deployment altitude, freefall time and stored speed stats:
+
+```bash
+jt logbook profile 33 --format summary
+jt logbook profile 33 --format summary --units meters --speed-unit kmh
+jt logbook profile 33 --format text      # Summary plus altitude/speed samples
+jt logbook profile 33 --format csv       # Samples for spreadsheets
+jt --output jumptrack_data/jump33.json logbook profile 33 --format json
+# Decode an existing download without Bluetooth:
+jt logbook profile 33 --file jumptrack_data/jump_00033_profile.txt --format summary
+```
+
+The default `--format hex` retains the existing raw download behavior. Decoded
+altitude units are `feet` (default) or `meters`; speed units are `mph` (default),
+`kmh`, `fps`, or `mps`. JSON includes named raw header values, selected-unit
+summaries, count warnings and all samples. CSV leaves unavailable speed cells
+blank; JSON uses null. Live JSON/CSV transport progress goes to stderr.
+
+Decoding follows the recovered JumpTrack 1.1.64 formulas: header ground pressure,
+0.1 hPa/count pressure samples, 0.25-second intervals starting at -2 seconds on
+the app's chart axis, and speed from 3/6-second altitude windows. The first
+29 samples have no speed value. Deployment altitude is the recorded header
+field, not an inferred point on the curve. The summary labels speeds neutrally:
+the APK names these fields `Tas`, but that does not confirm the recording mode.
+Header speed summaries are distinct
+from derived vertical-speed samples and the device's TAS/SAS display preference.
+Profile CRC and byte-count metadata are verified. Independent physical/hardware
+accuracy remains unverified. See
+[profile format](docs/PROFILE_FORMAT.md) and [APK audit](docs/APK_AUDIT.md).
+
+### Acceleration (ACC)
+
+```bash
+jt logbook acc 33 0 60 --decode summary
+jt logbook acc 33 0 60 --decode json
+jt --output acc.csv logbook acc 33 0 60 --decode csv
+jt logbook acc 33 0 60 --file jumptrack_data/acc33.txt --decode text
+python plot_acc.py --file jumptrack_data/acc33.txt
+python plot_acc.py --jump 33 --start 0 --duration 60
+```
+
+`--format hex` remains the default wire request. `--decode` adds app-derived
+scalar acceleration, timestamps and verified integrity. Words are divided by
+256 for g; `FFFF` maps to zero while retaining a sentinel flag and raw value.
+The interval is 0.02 seconds, starting at the requested start time. Text-wire
+ACC can still be retrieved with `--format text`, but its layout is unverified
+and cannot be combined with `--decode` or `--file`. Empty responses stay empty;
+no samples or chart are fabricated. ACC is scalar, not an XYZ vector or a
+replacement for barometric altitude/speed. See [ACC and integrity](docs/ACC_AND_INTEGRITY.md).
 
 ### Settings
 
@@ -207,25 +260,28 @@ are overwritten. Grouped commands print their result and save it only with
 ## Profile plotting
 
 ```bash
-# Offline: use an existing download.
-.venv/bin/python plot_profile.py --file jumptrack_data/jump_00035_profile.txt
-# Live: download one profile, with configuration writes disabled.
-.venv/bin/python plot_profile.py --jump 35
-# Explicit, experimental pressure/height assumptions.
-.venv/bin/python plot_profile.py --file jumptrack_data/jump_00035_profile.txt --pressure-scale 0.1 --reference-pressure 1007 --units feet
+# Default: raw values, decoded altitude and derived vertical speed.
+.venv/bin/python plot_profile.py --file jumptrack_data/jump_00033_profile.txt
+.venv/bin/python plot_profile.py --file jumptrack_data/jump_00033_profile.txt --units meters --speed-unit kmh
+# Live read; no configuration writes.
+.venv/bin/python plot_profile.py --jump 33
+# Raw-only view, or retain the older explicit experimental model.
+.venv/bin/python plot_profile.py --file jumptrack_data/jump_00033_profile.txt --raw
+.venv/bin/python plot_profile.py --file jumptrack_data/jump_00033_profile.txt --pressure-scale 0.1 --reference-pressure 1007 --units feet
 ```
 
-The plotter preserves raw words, header fields and checksum metadata. It exports
-PNG, CSV, original response text and metadata JSON to `jumptrack_data/profile_plots/`.
-Existing matching output files are overwritten; the source input is preserved.
-Use `--show` for a GUI window, `--output-dir` to choose a destination, and
-`--sample-interval` only when the actual interval is known.
+The default plot uses app-derived decoding and marks the recorded deployment
+altitude. It exports PNG, CSV, raw response and metadata JSON under
+`jumptrack_data/profile_plots/`. Unit-specific filenames separate decoded outputs
+from raw and legacy experimental results. Matching outputs are overwritten;
+the input file is preserved. Use `--show` for a GUI window or `--output-dir` to
+choose a destination. `--sample-interval` overrides only raw/experimental plots;
+app decoding always uses its source-defined timing.
 
-Profile encoding, sample timing, checksums and physical units remain unverified.
-Pressure conversion requires explicit assumptions. Structural count checks can
-warn or fail with `--strict-count`; `--expected-count` compares against the
-jump-list count field. See [profile format](docs/PROFILE_FORMAT.md) and
-[count evidence](docs/PROFILE_COUNT_COMPARISON.md).
+`--strict-count` rejects structural count mismatches; `--expected-count` compares
+the header against a jump-list count. CRC and byte-count verification is a
+separate, mandatory check for decoded profiles and ACC.
+See [profile format](docs/PROFILE_FORMAT.md) and [count evidence](docs/PROFILE_COUNT_COMPARISON.md).
 
 ## Python API and verification
 
@@ -256,8 +312,9 @@ Tests mock Bluetooth and cover routing, permissions, settings preservation,
 verification, transport framing, timeouts and experimental profile parsing.
 Tests that hash or execute the private Java reference skip when it is absent;
 execution also requires `javac` and `java`. Saved signatures allow ordinary
-coverage to run without that source. See the parity reference for the historical
-663-case Java comparison; skipped tests are not current execution evidence.
+coverage to run without that source. The recovered 1.1.64 reference was also
+executed against all 663 cases successfully; see [APK audit](docs/APK_AUDIT.md).
+Skipped tests on other checkouts are not current execution evidence.
 
 ## Project files
 
@@ -267,7 +324,10 @@ coverage to run without that source. See the parity reference for the historical
 | `jumptrack_cli.py` | Command definitions, grouping, routing and previews |
 | `java_uart_command_builder.py` | Java-derived commands and JSON adapters |
 | `uart_command_builder.py` | Compatible Python-friendly builder aliases |
-| `plot_profile.py` | Experimental profile parsing, conversion and plotting |
+| `wire_protocol.py` | Shared CRC/byte-count validation |
+| `acc_decoder.py` / `plot_acc.py` | App-derived ACC data and standalone charts |
+| `profile_decoder.py` | Profile parsing, named headers, app-derived altitude/speed and text/JSON/CSV output |
+| `plot_profile.py` | Profile charts and optional legacy experimental conversion |
 | `tests/` | Offline regression tests and saved Java signatures |
 | `docs/` | Command tree, protocol observations and technical references |
 | `jumptrack_data/` | Ignored local captures, plots and investigation scripts |
@@ -276,8 +336,8 @@ coverage to run without that source. See the parity reference for the historical
 
 This project is unofficial and is not affiliated with or endorsed by LB Altimeters.
 The extracted `UARTCommandBuilder.java` is a private, optional reference and is not
-distributed. It is absent from this checkout. Public signatures and ordinary tests
-are included. The builder contains no response decoder, checksum verification or
+distributed. A local ignored copy was recovered from the user-supplied 1.1.64 XAPK; public
+signatures and ordinary tests are included. See [APK audit](docs/APK_AUDIT.md). The builder contains no response decoder, checksum verification or
 Bluetooth transport; those parts of this project are separate implementations.
 
 No open-source license is granted by this repository at present. Redistribution

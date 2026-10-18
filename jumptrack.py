@@ -15,6 +15,8 @@ import asyncio
 import json
 import os
 import re
+import sys
+from contextlib import nullcontext, redirect_stdout
 from datetime import datetime
 from pathlib import Path
 
@@ -242,7 +244,11 @@ class JumpTrack:
                 raise TimeoutError(
                     f"No EOF after {timeout}s for {command!r}. Partial response:\n{partial}"
                 ) from exc
-            return self.buffer.decode("utf-8", errors="replace")
+            raw = self.buffer.decode("utf-8", errors="replace")
+            from wire_protocol import verify_response
+
+            verify_response(raw)
+            return raw
 
     async def execute_java(self, method, *args, timeout=30):
         """Send any original Java-named command using its declared access policy."""
@@ -302,6 +308,20 @@ class JumpTrack:
             self.commands.get_jump_profile_hex(jump_number), timeout=timeout
         )
 
+    async def get_jump_profile(
+        self, jump_number, *, altitude_unit="feet", speed_unit="mph", timeout=90
+    ):
+        """Read a hex profile and return app-derived header, altitude and speed data."""
+        from profile_decoder import decode_profile, parse_profile
+
+        raw = await self.get_jump_profile_hex(jump_number, timeout=timeout)
+        profile = parse_profile(raw)
+        if profile["jump_number"] != jump_number:
+            raise ValueError("Requested jump does not match the returned profile")
+        return decode_profile(
+            profile, altitude_unit=altitude_unit, speed_unit=speed_unit
+        )
+
     async def get_acc(
         self, jump_number, start_time, duration, *, hex_format=True, timeout=90
     ):
@@ -311,6 +331,14 @@ class JumpTrack:
             ),
             timeout=timeout,
         )
+
+    async def get_acc_decoded(self, jump_number, start_time, duration, *, timeout=90):
+        from acc_decoder import decode_acc
+
+        raw = await self.get_acc(
+            jump_number, start_time, duration, hex_format=True, timeout=timeout
+        )
+        return decode_acc(raw, expected=(jump_number, start_time, duration))
 
     # Configuration methods: disabled unless allow_writes=True
     async def _write(self, command, *, timeout=30):
@@ -738,6 +766,35 @@ def build_parser():
     return parser
 
 
+def display_result(result, output=None):
+    print(result)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(result, encoding="utf-8")
+
+
+def render_operation_result(args, result):
+    if args.action == "profile":
+        from profile_decoder import format_profile
+
+        return format_profile(
+            result,
+            output_format=args.profile_format,
+            altitude_unit=args.units,
+            speed_unit=args.speed_unit,
+            jump_number=args.jump_number,
+        )
+    if args.action == "acc" and args.decode:
+        from acc_decoder import format_acc
+
+        return format_acc(
+            result,
+            output_format=args.decode,
+            expected=(args.jump_number, args.start_time, args.duration),
+        )
+    return result
+
+
 async def run_operation(args, op):
     device = JumpTrack(
         address=args.address,
@@ -745,16 +802,17 @@ async def run_operation(args, op):
         allow_writes=op.write,
         allow_destructive=op.destructive,
     )
-    try:
-        await device.connect()
-        result = await getattr(device, op.method)(*op.args, **op.kwargs)
-        print(result)
-        if args.output is not None:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(result, encoding="utf-8")
-            print(f"Saved: {args.output.resolve()}")
-    finally:
-        await device.disconnect()
+    structured = (
+        args.action == "profile" and args.profile_format in ("json", "csv")
+    ) or (args.action == "acc" and args.decode in ("json", "csv"))
+    # Keep JSON/CSV stdout parseable; transport progress belongs on stderr.
+    with redirect_stdout(sys.stderr) if structured else nullcontext():
+        try:
+            await device.connect()
+            result = await getattr(device, op.method)(*op.args, **op.kwargs)
+        finally:
+            await device.disconnect()
+    display_result(render_operation_result(args, result), args.output)
 
 
 async def main(argv=None):
@@ -837,13 +895,24 @@ async def main(argv=None):
     if args.action:
         if legacy_reads or args.beeps is not None or args.list_devices:
             parser.error("Use COMMAND separately from legacy read/beep/list flags")
+        if (
+            args.action == "acc"
+            and (args.decode or args.acc_file)
+            and args.format != "hex"
+        ):
+            parser.error("ACC decoding and --file require --format hex (the default)")
         try:
             op = operation(args)
             command = preview(op, UARTCommandBuilder())
         except (ValueError, TypeError) as exc:
             parser.error(str(exc))
         if args.dry_run:
-            print("null" if command is None else command)
+            if args.action == "profile" and args.profile_file is not None:
+                print(
+                    f"Read saved profile {args.profile_file}; output format: {args.profile_format}; no Bluetooth"
+                )
+            else:
+                print("null" if command is None else command)
             return
         if command is None:
             parser.error(
@@ -851,6 +920,38 @@ async def main(argv=None):
             )
         if op.destructive and not args.allow_destructive:
             parser.error("This command requires --allow-destructive before COMMAND")
+        source_file = (
+            args.profile_file
+            if args.action == "profile"
+            else args.acc_file
+            if args.action == "acc"
+            else None
+        )
+        if source_file is not None:
+            try:
+                raw = source_file.read_text(encoding="utf-8")
+                if args.action == "profile":
+                    from profile_decoder import parse_profile
+
+                    if parse_profile(raw)["jump_number"] != args.jump_number:
+                        raise ValueError(
+                            "Requested jump does not match the saved profile"
+                        )
+                else:
+                    from acc_decoder import decode_acc
+
+                    decode_acc(
+                        raw, expected=(args.jump_number, args.start_time, args.duration)
+                    )
+                if (
+                    args.output is not None
+                    and args.output.resolve() == source_file.resolve()
+                ):
+                    raise ValueError("--output must not overwrite the source response")
+                display_result(render_operation_result(args, raw), args.output)
+            except (OSError, ValueError) as exc:
+                parser.exit(1, f"Error: {exc}\n")
+            return
         if not args.address:
             parser.error(
                 "Set --address, JUMPTRACK_ADDRESS, or .jumptrack-address before connecting"

@@ -5,37 +5,49 @@ import unittest
 from plot_profile import parse_profile
 
 
+def seal(raw):
+    import binascii
+
+    prefix = raw.split("CheckSum")[0].replace("\r\n", "\n").replace("\n", "\r\n")
+    return (
+        prefix
+        + f"CheckSum.Bytes: {len(prefix.encode()):05d}\r\nCheckSum.Sum: {binascii.crc_hqx(prefix.encode(), 0):05d}\r\nEOF\r\n"
+    )
+
+
 def reply(payload="173E17402755"):
-    return "\r\n".join(
-        [
-            "Get Hex Profile in Jump 00035",
-            *map(
-                str,
-                [
-                    35,
-                    10070,
-                    205,
-                    13760,
-                    3390,
-                    61,
-                    9,
-                    27,
-                    2026,
-                    17,
-                    38,
-                    123,
-                    10,
-                    132,
-                    16,
-                    1217,
-                ],
-            ),
-            payload,
-            "CheckSum.Bytes: 00000",
-            "CheckSum.Sum: 00000",
-            "EOF",
-            "",
-        ]
+    return seal(
+        "\r\n".join(
+            [
+                "Get Hex Profile in Jump 00035",
+                *map(
+                    str,
+                    [
+                        35,
+                        10070,
+                        205,
+                        13760,
+                        3390,
+                        61,
+                        9,
+                        27,
+                        2026,
+                        17,
+                        38,
+                        123,
+                        10,
+                        132,
+                        16,
+                        1217,
+                    ],
+                ),
+                payload,
+                "CheckSum.Bytes: 00000",
+                "CheckSum.Sum: 00000",
+                "EOF",
+                "",
+            ]
+        )
     )
 
 
@@ -56,7 +68,7 @@ class ProfileParserTests(unittest.TestCase):
         # without publishing personal jump captures.
         for count in [1274, 1393, 1217]:
             with self.subTest(count=count):
-                raw = reply("173E" * (count - 1)).replace("1217", str(count))
+                raw = seal(reply("173E" * (count - 1)).replace("1217", str(count)))
                 parsed = parse_profile(
                     raw, expected_profile_count=count, strict_count=True
                 )
@@ -66,18 +78,18 @@ class ProfileParserTests(unittest.TestCase):
                 self.assertEqual(parsed["validation_warnings"], [])
 
     def test_missing_and_extra_words_warn_or_fail_in_strict_mode(self):
-        valid = reply().replace("1217", "4")
+        valid = seal(reply().replace("1217", "4"))
         self.assertTrue(
             parse_profile(valid, strict_count=True)["count_matches_observed_layout"]
         )
         for payload in ["173E1740", "173E174027552755"]:
-            raw = reply(payload).replace("1217", "4")
+            raw = seal(reply(payload).replace("1217", "4"))
             self.assertTrue(parse_profile(raw)["validation_warnings"])
             with self.assertRaisesRegex(ValueError, "Profile count mismatch"):
                 parse_profile(raw, strict_count=True)
 
     def test_jump_list_header_mismatch(self):
-        raw = reply().replace("1217", "4")
+        raw = seal(reply().replace("1217", "4"))
         parsed = parse_profile(raw, expected_profile_count=5)
         self.assertTrue(parsed["count_matches_observed_layout"])
         self.assertIn("Jump-list/header", parsed["validation_warnings"][0])

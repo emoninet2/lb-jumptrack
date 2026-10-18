@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 from java_uart_command_builder import (
     DESTRUCTIVE_METHODS,
@@ -106,19 +107,62 @@ def _legacy_commands(parser, *, include_category=True):
         p.set_defaults(method=method, access=access)
         return p
 
-    p = command("profile", "get_jump_profile_hex", "Read a hex jump profile", "read")
+    p = command(
+        "profile",
+        "get_jump_profile_hex",
+        "Read a jump profile (raw or decoded)",
+        "read",
+    )
     p.add_argument("jump_number", type=bounded(-2147483648, 2147483647))
+    p.add_argument(
+        "--format",
+        dest="profile_format",
+        choices=("hex", "summary", "text", "json", "csv"),
+        default="hex",
+        help="Raw hex or app-derived decoded output (default: hex)",
+    )
+    p.add_argument(
+        "--units",
+        choices=("feet", "meters"),
+        default="feet",
+        help="Decoded altitude units (default: feet)",
+    )
+    p.add_argument(
+        "--speed-unit",
+        choices=("mph", "kmh", "fps", "mps"),
+        default="mph",
+        help="Decoded speed units (default: mph)",
+    )
+    p.add_argument(
+        "--file",
+        dest="profile_file",
+        type=Path,
+        help="Decode a saved profile instead of connecting to Bluetooth",
+    )
+
     p.add_argument(
         "--timeout",
         type=bounded(1, 3600),
         default=90,
         help="Response timeout in seconds (default: 90)",
     )
-    p = command("acc", "get_acc", "Read ACC data in hex or text", "read")
+    p = command("acc", "get_acc", "Read ACC data (raw or decoded)", "read")
     p.add_argument("jump_number", type=bounded(-2147483648, 2147483647))
     p.add_argument("start_time", type=bounded(-2147483648, 2147483647))
     p.add_argument("duration", type=bounded(-2147483648, 2147483647))
     p.add_argument("--format", choices=("hex", "text"), default="hex")
+    p.add_argument(
+        "--decode",
+        choices=("summary", "text", "json", "csv"),
+        help="Decode hex ACC samples to g and timestamps",
+    )
+    p.add_argument(
+        "--file",
+        dest="acc_file",
+        type=Path,
+        help="Read a saved hex ACC response without Bluetooth",
+    )
+
     p.add_argument("--timeout", type=bounded(1, 3600), default=90)
     p = command(
         "beeps", "set_button_beeps", "Change only button beeps; read back to verify"

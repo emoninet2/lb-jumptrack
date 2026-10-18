@@ -21,7 +21,7 @@ from pathlib import Path
 import java_uart_command_builder as port
 
 MASTER = Path(__file__).resolve().parents[1] / "UARTCommandBuilder.java"
-MASTER_SHA256 = "b68c90a5d30d2dc536a352fcb8c584f83fb4117519c6d0d2fac4a597358e76f5"
+MASTER_SHA256 = "281458d5dc3df365e62761230c3a566b2d65ddac28bf3ba7ab35f9df13bfb873"
 
 
 def block(source, start):
