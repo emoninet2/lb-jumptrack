@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+jumptrack_data/
+archive/
+
+# Local reference extracted from the Android APK; not redistributed.
+/UARTCommandBuilder.java
+# Personal connection identifier and device captures.
+/.jumptrack-address
+/tests/fixtures/jump_*_profile.txt
+/docs/LIVE_TEST_RESULTS.md
+.env
+.env.*
+*.pem

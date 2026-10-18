@@ -1,0 +1,209 @@
+{
+  "master_sha256": "b68c90a5d30d2dc536a352fcb8c584f83fb4117519c6d0d2fac4a597358e76f5",
+  "constants": {
+    "READ_ALL_WARNINGS_COMMAND": "R-00",
+    "READ_JUMPS_LIST_COMMAND": "Get New Jump List",
+    "READ_JUMP_COUNTER_COMMAND": "Get Jump Counter",
+    "READ_JUMP_PROFILE_HEX_COMMAND": "Get Hex Profile in Jump",
+    "READ_JUMP_PROFILE_HEX_COMMAND_PATTERN": "Get Hex Profile in Jump \\d{2,6}",
+    "MIN_VALUES_NUMBER": 3,
+    "MAX_VALUES_NUMBER": 4,
+    "$stable": 0
+  },
+  "signatures": {
+    "prepareDateTimeCommand": [
+      [
+        "datetime"
+      ]
+    ],
+    "preparePowerOffCommand": [
+      []
+    ],
+    "prepareSetDistanceUOM": [
+      [
+        "DistanceUOM"
+      ]
+    ],
+    "prepareSetSpeedUOM": [
+      [
+        "SpeedUOM"
+      ]
+    ],
+    "prepareGetSpeedUOM": [
+      []
+    ],
+    "prepareSetTotalFreeFallTimeCommand": [
+      [
+        "int",
+        "int",
+        "int"
+      ],
+      [
+        "string",
+        "string",
+        "string"
+      ]
+    ],
+    "prepareSendFlightWarningsCommand": [
+      [
+        "warnings"
+      ],
+      [
+        "int",
+        "warnings"
+      ]
+    ],
+    "prepareSendFreeFallWarningsCommand": [
+      [
+        "int",
+        "warnings"
+      ]
+    ],
+    "prepareSendCanopyWarningsCommand": [
+      [
+        "int",
+        "warnings"
+      ]
+    ],
+    "prepareSendFreeFallSoundSetupCommand": [
+      [
+        "int",
+        "int"
+      ]
+    ],
+    "prepareSendCanopySoundSetupCommand": [
+      [
+        "int",
+        "int"
+      ]
+    ],
+    "prepareSendFlightWarningsSoundSetupCommand": [
+      [
+        "int",
+        "int"
+      ]
+    ],
+    "prepareSendFreeFallPlaySoundCommand": [
+      []
+    ],
+    "prepareSendCanopyPlaySoundCommand": [
+      []
+    ],
+    "prepareSendFlightAlarmsPlaySoundCommand": [
+      []
+    ],
+    "prepareSetDefaultAlarmValuesCommand": [
+      []
+    ],
+    "prepareFactoryResetCommand": [
+      []
+    ],
+    "prepareReadDeviceSettingsR40Command": [
+      []
+    ],
+    "prepareReadDeviceSettingsR41Command": [
+      []
+    ],
+    "prepareReadDeviceSettingsR42Command": [
+      []
+    ],
+    "prepareDeviceSettingsW40Command": [
+      [
+        "DeviceBLEMode",
+        "bool",
+        "DeviceDiveType",
+        "DeviceTemperatureUnits"
+      ]
+    ],
+    "prepareWriteDeviceSettingsW41Command": [
+      [
+        "bool",
+        "bool"
+      ]
+    ],
+    "prepareDeviceSettingsW42Command": [
+      [
+        "int",
+        "DateFormat",
+        "bool",
+        "int"
+      ]
+    ],
+    "prepareBacklightCommand": [
+      [
+        "bool",
+        "int"
+      ]
+    ],
+    "prepareMotionAlarmCommand": [
+      [
+        "int",
+        "int"
+      ]
+    ],
+    "prepareSetSwoopGuideCommand": [
+      [
+        "bool"
+      ]
+    ],
+    "prepareSetTrackGuideCommand": [
+      [
+        "bool"
+      ]
+    ],
+    "prepareSetCanopyActiveBankCommand": [
+      [
+        "int"
+      ]
+    ],
+    "prepareSetFlightWarningActiveBankCommand": [
+      [
+        "int"
+      ]
+    ],
+    "prepareSetFreeFallActiveBankCommand": [
+      [
+        "int"
+      ]
+    ],
+    "prepareSendAltitudeCommand": [
+      [
+        "long",
+        "int"
+      ]
+    ],
+    "prepareReadJumpCountCommand": [
+      []
+    ],
+    "prepareSetJumpCountCommand": [
+      [
+        "int"
+      ]
+    ],
+    "prepareEraseEntireLogbookCommand": [
+      []
+    ],
+    "prepareGetACCCommand": [
+      [
+        "int",
+        "int",
+        "int"
+      ]
+    ],
+    "prepareGetACCCommandHex": [
+      [
+        "int",
+        "int",
+        "int"
+      ]
+    ],
+    "prepareGetDeviceInfoCommand": [
+      []
+    ],
+    "prepareLoadLumpProfileCommandHex": [
+      [
+        "int"
+      ]
+    ]
+  }
+}
