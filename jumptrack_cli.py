@@ -268,6 +268,38 @@ def add_commands(parser):
         "list-models", help="List recognized families and verified models (offline)"
     )
     models.set_defaults(action="list-models")
+    scan = device.add_parser(
+        "scan",
+        help="Discover nearby Bluetooth devices; recognized families by default",
+        description="Scan advertisements without connecting. Filter by name or address; use --all for other devices.",
+    )
+    scan.add_argument(
+        "--timeout",
+        type=bounded(1, 300),
+        default=10,
+        help="Scan duration in seconds (default: 10)",
+    )
+    scan.add_argument(
+        "--all",
+        dest="all_devices",
+        action="store_true",
+        help="Include unnamed and unrecognized devices",
+    )
+    scan.add_argument(
+        "--filter",
+        dest="scan_filter",
+        default="",
+        metavar="TEXT",
+        help="Case-insensitive substring of advertised name or address",
+    )
+    scan.add_argument(
+        "--json",
+        dest="scan_json",
+        action="store_true",
+        help="Print structured JSON instead of a table",
+    )
+    scan.set_defaults(action="scan")
+
     leaf(device, "power-off", "power-off")
     logbook = group(root, "logbook", "Jump records and accumulated totals")
     for name in ("list", "profile", "acc"):

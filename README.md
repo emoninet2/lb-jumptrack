@@ -54,6 +54,28 @@ jt device list-models
 Without a command, the legacy default reads device information, jump counter and
 jump list and saves them under `jumptrack_data/` in the current directory.
 
+### Bluetooth discovery
+
+```bash
+jt device scan                         # Recognized JumpTrack families only
+jt device scan --filter protrack        # Name or address substring, case-insensitive
+jt device scan --all                    # Include other devices and unnamed advertisements
+jt device scan --all --filter AA:BB     # Narrow by address
+jt device scan --timeout 20             # Default 10 seconds; allowed 1–300
+jt device scan --json                   # Structured results
+jt --output devices.json device scan --json
+```
+
+Scanning needs no configured address and does not connect, pair or change device
+settings. It lists advertised names, platform identifiers, signal strength in
+dBm, recognized family and whether the exact model is in the tested-model list.
+Results are sorted by signal strength, strongest first. A recognized name is a
+hint, not proof of compatibility or device identity. Advertisement names can be
+missing until the device enables Bluetooth; use `--all` when troubleshooting.
+`--filter` narrows the default family selection; add `--all` to search other devices.
+Addresses are not saved automatically. Copy the desired identifier into `--address`,
+`JUMPTRACK_ADDRESS`, or `.jumptrack-address` for subsequent operations.
+
 ### Logbook
 
 ```bash

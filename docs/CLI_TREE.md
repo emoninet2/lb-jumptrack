@@ -7,6 +7,7 @@ jumptrack.py
 ├── device — Device information and power
 │   ├── info — Read device information
 │   ├── list-models — List recognized families and verified models (offline)
+│   ├── scan — Discover nearby Bluetooth devices; recognized families by default
 │   └── power-off — Power off the device
 ├── logbook — Jump records and accumulated totals
 │   ├── list — Read jump list

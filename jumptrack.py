@@ -18,7 +18,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 
 from java_uart_command_builder import DESTRUCTIVE_METHODS, READ_METHODS, SIGNATURES
@@ -63,6 +63,68 @@ def is_verified_python_model(name):
     return (
         isinstance(name, str)
         and " ".join(name.upper().split()) in VERIFIED_PYTHON_MODELS
+    )
+
+
+async def scan_devices(*, timeout=10, all_devices=False, query=""):
+    """Discover advertisements; never connect or save an address automatically."""
+    advertisements = await BleakScanner.discover(timeout=timeout, return_adv=True)
+    rows = []
+    query = query.casefold().strip()
+    for device, advertisement in advertisements.values():
+        name = advertisement.local_name or device.name or ""
+        try:
+            family = normalize_device_family(name)
+        except ValueError:
+            family = None
+        if not all_devices and family is None:
+            continue
+        if (
+            query
+            and query not in name.casefold()
+            and query not in device.address.casefold()
+        ):
+            continue
+        rows.append(
+            {
+                "name": name or "(unnamed)",
+                "address": device.address,
+                "rssi": advertisement.rssi,
+                "family": family,
+                "verified_model": is_verified_python_model(name),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["rssi"] is None,
+            -(row["rssi"] or 0),
+            row["name"].casefold(),
+            row["address"],
+        ),
+    )
+
+
+def format_scan_results(rows):
+    if not rows:
+        return (
+            "No matching Bluetooth devices found. Enable device Bluetooth or try --all."
+        )
+    columns = [("NAME", "ADDRESS / IDENTIFIER", "RSSI", "FAMILY", "TESTED MODEL")]
+    columns.extend(
+        (
+            row["name"],
+            row["address"],
+            f"{row['rssi']} dBm" if row["rssi"] is not None else "unknown",
+            row["family"] or "unrecognized",
+            "yes" if row["verified_model"] else "unverified",
+        )
+        for row in rows
+    )
+    widths = [max(len(row[index]) for row in columns) for index in range(5)]
+    return "\n".join(
+        "  ".join(value.ljust(width) for value, width in zip(row, widths)).rstrip()
+        for row in columns
     )
 
 
@@ -702,6 +764,41 @@ async def main(argv=None):
     args = parser.parse_args(argv)
     if args.action == "group-help":
         args.help_parser.print_help()
+        return
+    if args.action == "scan":
+        if (
+            args.settings
+            or args.warnings
+            or args.profile is not None
+            or args.beeps is not None
+            or args.list_devices
+            or args.allow_destructive
+        ):
+            parser.error(
+                "Use device scan separately from legacy operation flags and --allow-destructive"
+            )
+        if args.dry_run:
+            print(
+                f"Bluetooth scan for {args.timeout}s; include all: {args.all_devices}; filter: {args.scan_filter!r}"
+            )
+            return
+        try:
+            rows = await scan_devices(
+                timeout=args.timeout,
+                all_devices=args.all_devices,
+                query=args.scan_filter,
+            )
+            result = (
+                json.dumps(rows, indent=2)
+                if args.scan_json
+                else format_scan_results(rows)
+            )
+            print(result)
+            if args.output is not None:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(result + "\n", encoding="utf-8")
+        except (OSError, RuntimeError, ValueError, BleakError) as exc:
+            parser.exit(1, f"Bluetooth scan failed: {exc}\n")
         return
     if args.action == "list-models":
         if (
