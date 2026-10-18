@@ -1,7 +1,8 @@
 # JumpTrack Python
 
 Unofficial BLE UART client based on an extracted Android `UARTCommandBuilder.java`.
-It provides grouped CLI commands, a Python API, and app-derived profile and ACC decoders and plotters.
+It provides a desktop GUI, grouped CLI commands, a Python API, and app-derived
+profile and ACC decoders and plotters.
 PROTRACK 3 is the tested model; support for other device families is unverified.
 
 ## Setup
@@ -18,6 +19,90 @@ jt tree
 Alternatively, use `--address` or put your identifier in the ignored local
 `.jumptrack-address` file. Enable Bluetooth on the device immediately before a
 live request. Constants, help, the command tree and dry runs need no connection.
+
+## Desktop GUI
+
+```bash
+.venv/bin/python -m pip install -r requirements-gui.txt
+.venv/bin/python jumptrack_gui.py
+# Synthetic preview without Bluetooth or hardware writes:
+.venv/bin/python jumptrack_gui.py --demo
+```
+
+Scan and select a Bluetooth device, then connect to load available information,
+warnings, settings and the jump list. Edits are staged locally and highlighted;
+**Apply changes** writes only affected operations and reads back to verify them.
+The Logbook tab provides a jump selector, information panel, altitude/vertical-speed
+graphs, local file opening and JSON export. Unavailable settings remain disabled.
+
+Erase-logbook and factory-reset actions are separate and require both an
+acknowledgement and an exact typed phrase. Individual jump deletion is disabled
+because no verified command is available. See [desktop workflow and safeguards](docs/GUI.md).
+The screenshots and automated GUI tests use synthetic data. CLI dependencies
+remain separate from optional GUI dependencies.
+
+### Desktop tour
+
+These are screenshots of the running **demo app**, not live device captures.
+Names, jump records, battery readings and profiles are synthetic. Demo mode
+exercises the interface without Bluetooth or hardware writes; device firmware
+may omit some of the settings shown here.
+
+**Overview and connection.** Scan by name/address, choose a device, and connect
+to load its information. The overview shows the jump counter, accumulated
+freefall time, and battery voltage with the device-reported status. Full, Half,
+Almost empty and Critical use green, yellow, orange and red respectively;
+unknown status is grey. These levels are not percentage estimates. The session
+stays open across ordinary edits and applies until Disconnect or closing the app,
+unless the hardware drops its connection.
+
+![Demo overview with connection controls, battery status and accumulated totals](docs/images/desktop-overview.png)
+
+**Warning banks and sound tests.** Flight, Freefall and Canopy have separate
+tabs, with banks as columns and altitude thresholds as rows. The amber bank
+below contains a local edit; **Apply changes** writes affected settings and reads
+them back. **Discard changes** restores the loaded values without writing.
+Active bank, pitch and volume are configured below the table. **Test saved sound**
+plays the category's saved sound on the device and reserves the connection for
+the APK's 25-second playback window. Apply pitch/volume edits before testing;
+sound settings are shared across banks within each category.
+
+![Demo warning table with an amber pending bank edit and saved-sound test control](docs/images/desktop-warnings.png)
+
+**Logbook and graphs.** Select a jump to load its checked profile, recorded
+exit/deployment altitudes, freefall time and stored speed statistics. The charts
+show altitude and derived vertical speed over time; the dashed line marks the
+recorded deployment altitude. Display units, pan/zoom, saved-profile opening and
+JSON export are available here. TAS/SAS recording mode remains unknown rather
+than inferred from the graph.
+
+![Demo jump profile with summary, altitude and vertical-speed charts](docs/images/desktop-logbook.png)
+
+**Settings, date/time and altitude offset.** Preferences are grouped into
+General, Measurement units, Bluetooth and Display. Separate clock controls set
+a local date/time or sync with the computer, with readback verification.
+Altitude offset shows the current signed value in the device's distance units.
+It requires its own acknowledgement and typed `SET OFFSET` confirmation:
+setting an offset enters Flight Mode and disables Bluetooth, and the tested
+PROTRACK 3 may need its reset-hole procedure before further use. Offset is sent
+once and ends the session; the app does not claim an immediate verified readback.
+
+![Demo settings with grouped preferences, device clock and altitude offset](docs/images/desktop-settings.png)
+
+<details>
+<summary>Maintenance and deletion safeguards</summary>
+
+Erasing the logbook and restoring factory settings are separated from ordinary
+editing. Each dialog identifies the device and requires both acknowledgement and
+an exact action-specific phrase. Cancel is the default and confirmation starts
+disabled. Single-jump deletion remains disabled because no verified command is
+available. These screenshots only show the controls; no erase/reset was run.
+
+![Demo maintenance page with separate erase and factory-reset actions](docs/images/desktop-maintenance.png)
+
+![Demo logbook erase confirmation with unchecked acknowledgement and disabled confirmation](docs/images/desktop-erase-confirmation.png)
+
+</details>
 
 ## CLI
 
@@ -321,6 +406,8 @@ Skipped tests on other checkouts are not current execution evidence.
 | File | Purpose |
 | --- | --- |
 | `jumptrack.py` | BLE transport, response interpretation and CLI entry point |
+| `jumptrack_gui.py` | Desktop GUI and background asyncio bridge |
+| `gui_backend.py` / `gui_demo.py` | Staged settings session and explicit synthetic demo |
 | `jumptrack_cli.py` | Command definitions, grouping, routing and previews |
 | `java_uart_command_builder.py` | Java-derived commands and JSON adapters |
 | `uart_command_builder.py` | Compatible Python-friendly builder aliases |

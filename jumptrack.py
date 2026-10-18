@@ -204,7 +204,8 @@ class JumpTrack:
         """Send an ASCII command; return raw decoded response.
 
         Raises TimeoutError instead of silently returning incomplete data.
-        Power-off submits the BLE write without waiting for an EOF response.
+        Power-off and explicit no-response operations submit the BLE write
+        without waiting for an EOF response.
         A successful submission does not verify the physical power state.
         """
         if command is None:
@@ -375,8 +376,12 @@ class JumpTrack:
     async def set_sound(self, category, pitch, volume):
         return await self._write(self.commands.set_sound(category, pitch, volume))
 
-    async def play_sound(self, category):
-        return await self._write(self.commands.play_sound(category))
+    async def play_sound(self, category, *, wait_for_response=True):
+        return await self.send_command(
+            self.commands.play_sound(category),
+            write=True,
+            wait_for_response=wait_for_response,
+        )
 
     async def set_default_alarm_values(self):
         return await self._write(self.commands.set_default_alarm_values())
@@ -492,9 +497,11 @@ class JumpTrack:
     async def set_active_bank(self, category, bank):
         return await self._write(self.commands.set_active_bank(category, bank))
 
-    async def set_altitude(self, altitude, *, negative=False):
-        return await self._write(
-            self.commands.set_altitude(altitude, negative=negative)
+    async def set_altitude(self, altitude, *, negative=False, wait_for_response=True):
+        return await self.send_command(
+            self.commands.set_altitude(altitude, negative=negative),
+            write=True,
+            wait_for_response=wait_for_response,
         )
 
     # Destructive: require allow_destructive=True
@@ -646,6 +653,27 @@ def parse_jump_list(raw):
     return records
 
 
+def parse_battery_information(raw):
+    """Decode the voltage and four-level status exported by the device.
+
+    Status names match JumpTrack's battery icons; these are not percentages.
+    """
+    match = re.search(r"(?m)^Battery:[ \t]*([^\r\n]*)", raw)
+    value = match[1].strip() if match else None
+    voltage = re.fullmatch(
+        r"([0-9]+(?:\.[0-9]+)?)\s*Volt(?:\s*,\s*([0-9]+))?", value or "", re.IGNORECASE
+    )
+    code = int(voltage[2]) if voltage and voltage[2] is not None else None
+    return {
+        "raw": value,
+        "voltage": float(voltage[1]) if voltage else None,
+        "status_code": code,
+        "status": {1: "Full", 2: "Half", 3: "Almost empty", 4: "Critical"}.get(
+            code, "Unknown"
+        ),
+    }
+
+
 def parse_warning_configuration(raw):
     """Parse observed PROTRACK 3 R-00 records without changing device settings.
 
@@ -689,11 +717,12 @@ def parse_warning_configuration(raw):
                 for index, code in enumerate(bank_codes, start=1)
             },
         }
-    battery = re.search(r"(?m)^Battery:\s*(.+)$", raw)
+    battery = parse_battery_information(raw)
     return {
         "categories": categories,
         "altitude_unit": "unverified",
-        "battery": battery.group(1).strip() if battery else None,
+        "battery": battery["raw"],
+        "battery_info": battery,
         "raw": raw,
     }
 
@@ -723,6 +752,9 @@ def format_warning_configuration(config):
             )
     if config["battery"]:
         lines.extend(["", f"Battery: {config['battery']}"])
+        lines.append(
+            f"Battery status: {config['battery_info']['status']} (device reported; not a percentage)"
+        )
     return "\n".join(lines)
 
 
