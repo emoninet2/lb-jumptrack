@@ -211,7 +211,7 @@ jt track-guide off
 jt power-off
 ```
 
-Backlight value accepts a signed Java int (default 0; formatted to a minimum of two digits) and is ignored when switching off. Motion takes signed Java int countdown and sensitivity, formatted to a minimum of three digits; units/ranges meaningful to firmware remain unverified. Both guide names deliberately produce the same W-21 command, matching the supplied Java. Power-off can disconnect the device before the client's expected response terminator arrives.
+Backlight value accepts a signed Java int (default 0; formatted to a minimum of two digits) and is ignored when switching off. Motion takes signed Java int countdown and sensitivity, formatted to a minimum of three digits; units/ranges meaningful to firmware remain unverified. Both guide names deliberately produce the same W-21 command, matching the supplied Java. Power-off sends the UART command and returns without waiting for EOF. It prints `Power-off command sent (no response expected).` This confirms BLE write submission, not the physical power state; the user has observed that the device powers off.
 
 ## Logbook and factory operations
 
@@ -246,7 +246,7 @@ Do not combine a subcommand with legacy read flags, `--beeps`, or `--list-device
 
 The client expects responses ending in `EOF\r\n`. Most subcommands print raw responses; profile/ACC decoding and checksums are not supplied by the Java builder. Beep-only updates additionally perform the readback described above. Other write responses are not proof that firmware applied the requested change.
 
-If a write times out or the device disconnects, it may already have applied. Inspect the device or read its settings before deciding what to do next. Power-off, reset and sound commands have not been verified to use the same response framing. An unfamiliar R-40 response will stop the beep shortcut before changing settings.
+If a write times out or the device disconnects, it may already have applied. Inspect the device or read its settings before deciding what to do next. Power-off deliberately skips EOF waiting, following a user hardware test where it powered off without a response. Reset and sound completion behavior remains unverified. An unfamiliar R-40 response will stop the beep shortcut before changing settings.
 
 Supported family names inherited from the existing code are PROTRACK, STELLA, ORDINAL and VISOX. The existing verified-model list contains PROTRACK 3; this does not establish that every command works on other families. CLI expansion was tested offline with mocked BLE clients, without connecting to a device.
 
@@ -282,7 +282,7 @@ The tests cover all 40 public Java method signatures, all builder-to-CLI routes,
 
 A read-only PROTRACK 3 firmware 01.04 test confirmed device information, jump counter/list, all-warning reads, R-40/R-41 records, and retrieval of jump 35’s hex profile. Button beeps read as off. No write commands were sent.
 
-Standalone R-38 returned only a blank line and timed out; speed settings were present inside R-00 instead. R-42 returned a complete response without a W-42 record. Both ACC formats returned complete responses with no samples for jump 35/start 0/duration 5; data retrieval is not yet verified. See docs/LIVE_TEST_RESULTS.md for details. All configuration writes, reset/erase, sound playback and power-off remain untested.
+Standalone R-38 returned only a blank line and timed out; speed settings were present inside R-00 instead. R-42 returned a complete response without a W-42 record. Both ACC formats returned complete responses with no samples for jump 35/start 0/duration 5; data retrieval is not yet verified. See docs/LIVE_TEST_RESULTS.md for details. Configuration writes, reset/erase and sound playback remain untested. A subsequent user test confirmed that power-off shuts the device down without returning EOF.
 
 ## Manual profile plotting test
 
@@ -305,7 +305,7 @@ The decoder supports the layout observed on PROTRACK 3 firmware 01.04: 16 decima
 
 Offline decoder checks: `.venv/bin/python -m unittest tests.test_profile_parser -v`.
 
-The latest full suite has 45 passing test functions covering all 40 Java signatures, including an independent Java execution comparison for 663 inputs. The Java oracle test requires `javac` and `java` and skips if a JDK is absent. It compiles only a temporary generated harness, leaving the master file untouched.
+The latest full suite has 49 passing test functions covering all 40 Java signatures, including an independent Java execution comparison for 663 inputs. The Java oracle test requires `javac` and `java` and skips if a JDK is absent. It compiles only a temporary generated harness, leaving the master file untouched.
 
 ## Raw data and estimated units
 

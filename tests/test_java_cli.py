@@ -84,7 +84,10 @@ class JavaCLITests(unittest.IsolatedAsyncioTestCase):
             await getattr(device,method)(*args,timeout=42)
             sent=device.send_command.call_args
             self.assertEqual(sent.args[0],getattr(device.commands,method)(*args))
-            self.assertEqual(sent.kwargs,dict(timeout=42,write=method not in master.READ_METHODS and method not in master.DESTRUCTIVE_METHODS,destructive=method in master.DESTRUCTIVE_METHODS))
+            expected_kwargs=dict(timeout=42,write=method not in master.READ_METHODS and method not in master.DESTRUCTIVE_METHODS,destructive=method in master.DESTRUCTIVE_METHODS)
+            if method == 'preparePowerOffCommand':
+                expected_kwargs['wait_for_response']=False
+            self.assertEqual(sent.kwargs,expected_kwargs)
 
     async def test_null_never_constructs_a_ble_client_or_sends(self):
         argv=['java','prepareSendFreeFallSoundSetupCommand','[0,1]']

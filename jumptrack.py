@@ -74,6 +74,7 @@ class JumpTrack:
         self.allow_destructive = allow_destructive
         self.debug = debug
         self._notifications_started = False
+        self._power_off_sent = False
 
     def _notification_handler(self, _sender, data):
         self.buffer.extend(data)
@@ -84,6 +85,7 @@ class JumpTrack:
 
     async def connect(self):
         await self.client.connect()
+        self._power_off_sent = False
         try:
             await self.client.start_notify(UART_TX, self._notification_handler)
             self._notifications_started = True
@@ -95,18 +97,27 @@ class JumpTrack:
     async def disconnect(self):
         try:
             if self.client.is_connected and self._notifications_started:
-                await self.client.stop_notify(UART_TX)
+                try:
+                    await self.client.stop_notify(UART_TX)
+                except BleakError:
+                    if not self._power_off_sent:
+                        raise
         finally:
             self._notifications_started = False
             if self.client.is_connected:
-                await self.client.disconnect()
+                try:
+                    await self.client.disconnect()
+                except BleakError:
+                    if not self._power_off_sent:
+                        raise
             print("Disconnected")
 
-    async def send_command(self, command, *, timeout=30, write=False, destructive=False):
+    async def send_command(self, command, *, timeout=30, write=False, destructive=False, wait_for_response=True):
         """Send an ASCII command; return raw decoded response.
 
         Raises TimeoutError instead of silently returning incomplete data.
-        Some control commands may not use EOF; those need separate verification.
+        Power-off submits the BLE write without waiting for an EOF response.
+        A successful submission does not verify the physical power state.
         """
         if command is None:
             raise ValueError("Java master returned null: no command was sent")
@@ -124,6 +135,11 @@ class JumpTrack:
             payload = command.encode("ascii") + b"\r"
             print(f"Sending: {payload!r}")
             await self.client.write_gatt_char(UART_RX, payload, response=False)
+            if not wait_for_response:
+                if command == self.commands.preparePowerOffCommand():
+                    self._power_off_sent = True
+                    return "Power-off command sent (no response expected)."
+                return "Command sent (no response requested)."
             try:
                 await asyncio.wait_for(self.response_event.wait(), timeout)
             except asyncio.TimeoutError as exc:
@@ -141,7 +157,8 @@ class JumpTrack:
         return await self.send_command(
             command, timeout=timeout,
             write=method not in READ_METHODS and method not in DESTRUCTIVE_METHODS,
-            destructive=method in DESTRUCTIVE_METHODS)
+            destructive=method in DESTRUCTIVE_METHODS,
+            **({'wait_for_response': False} if method == 'preparePowerOffCommand' else {}))
 
     # Read-only: device and logbook
     async def get_device_info(self):
@@ -187,7 +204,7 @@ class JumpTrack:
         return await self._write(self.commands.set_datetime(value))
 
     async def power_off(self):
-        return await self._write(self.commands.power_off())
+        return await self.send_command(self.commands.power_off(), write=True, wait_for_response=False)
 
     async def set_distance_uom(self, unit):
         return await self._write(self.commands.set_distance_uom(unit))
