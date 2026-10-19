@@ -19,6 +19,7 @@ this is not cross-compilation from Linux.
 | `packaging/windows.iss` | Per-user Windows installer, shortcuts and uninstaller |
 | `packaging/appimage-tools.json` | Pinned upstream AppImage tool/runtime URLs and SHA-256 digests |
 | `.github/workflows/desktop.yml` | Native OS/architecture CI matrix; tests and downloadable artifacts |
+| `publish_release.py` | Verify all build targets, smoke reports and hashes before public pre-release publication |
 
 ## Build locally
 
@@ -86,15 +87,33 @@ device firmware, radio permissions or OS security prompts. Those require manual
 testing on each target OS before calling a release hardware-validated. Source
 tests using the optional private Java reference skip in CI when it is absent.
 
-No GitHub Release is published automatically. To distribute a version:
+Pushing a matching version tag automatically publishes a **public pre-release**
+after all five build jobs pass. Branch/PR/manual runs do not publish releases.
+The release job downloads this run's artifacts, verifies their versions, exact
+package names, SHA-256 hashes and both smoke reports, then uploads individual
+packages to a draft. Only a complete verified upload is made public. It adds a
+download table, combined `SHA256SUMS.txt` and `BUILDINFO.json`. Public release
+downloads need no GitHub login and do not expire with Actions artifacts.
+
+To distribute a version:
 
 1. Update `APP_VERSION` in `app_metadata.py`; review direct dependency pins when
    needed. The GUI, installer names, version resources and metadata follow it.
 2. Commit changes and wait for all five native jobs to pass.
-3. If tagging, use `v<APP_VERSION>`: the workflow rejects mismatched version tags.
-4. Review the smoke reports and manually check Bluetooth on real computers.
-5. Sign/notarize the distributables as appropriate, then attach the packages and
-   their checksums to a GitHub Release with installation notes.
+3. Update the README's version-specific download links. Create an annotated
+   `v<APP_VERSION>` tag and push it: the workflow rejects mismatched version tags.
+4. Wait for the tag's workflow to finish; its final job publishes the pre-release.
+   Failures leave no public release or only an unpublished draft. Draft uploads
+   can be retried; an already-public release is never overwritten by the helper.
+5. Review smoke reports and manually check Bluetooth/OS installation on real
+   computers. Signing/notarization and promotion to a stable release remain
+   explicit maintainer steps. The current workflow publishes unsigned development
+   pre-releases, with their limitations stated in the generated notes.
+
+The release job alone receives `contents: write`; build/PR jobs remain read-only.
+It uses GitHub's short-lived Actions token, with no personal token in the repo.
+When adding target architectures, update `publish_release.py`'s required target
+coverage as well as the workflow matrix so missing packages cannot publish silently.
 
 The build manifest records the actual installed dependency versions and artifact
 hashes. Direct dependencies/tools are pinned; transitive dependencies and OS

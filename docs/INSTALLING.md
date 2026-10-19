@@ -17,12 +17,13 @@ The actual version replaces `VERSION` in each filename. Windows ARM is not a
 native target in the initial build matrix. Packages are desktop applications;
 they do not target Android, iOS, or every Linux distribution.
 
-Downloads are produced by the repository's **Desktop packages** GitHub Actions
-workflow. Open a completed run and download the artifact for your OS/processor;
-extract GitHub's artifact ZIP first to get the installer inside. Downloading
-Actions artifacts can require signing in to GitHub. A maintainer can also attach
-the resulting packages to a GitHub Release; packaging does not publish a release
-automatically. See [maintainer instructions](PACKAGING.md).
+Download public packages from [GitHub Releases](https://github.com/emoninet2/lb-jumptrack-python/releases).
+Choose the installer directly from the release's download table or Assets list;
+no GitHub account is needed. Version tags publish pre-releases after all native
+builds, smoke checks and package hashes pass. These public release files do not
+have the Actions artifact retention limit. Branch/PR workflow artifacts are
+temporary development downloads and may require a GitHub login. See
+[maintainer instructions](PACKAGING.md).
 
 ## Windows
 

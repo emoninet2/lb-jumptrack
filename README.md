@@ -22,6 +22,22 @@ live request. Constants, help, the command tree and dry runs need no connection.
 
 ## Desktop GUI
 
+### Public downloads — v0.1.0 pre-release
+
+No GitHub account or Python installation is needed to download these packages.
+
+| Computer | Download |
+| --- | --- |
+| Windows x64 | [Installer (.exe)](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-windows-x86_64-Setup.exe) |
+| Mac — Apple Silicon (M-series) | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-macos-arm64.dmg) |
+| Mac — Intel | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-macos-x86_64.dmg) |
+| Linux x64 | [AppImage](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-linux-x86_64.AppImage) |
+| Linux ARM64 | [AppImage](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-linux-arm64.AppImage) |
+
+See the [release page](https://github.com/emoninet2/lb-jumptrack-python/releases/tag/v0.1.0)
+for portable alternatives, checksums and testing limitations, or [all releases](https://github.com/emoninet2/lb-jumptrack-python/releases).
+These are unsigned development packages; macOS builds are not notarized.
+
 For a computer without Python, the shared desktop build pipeline produces a
 Windows installer/portable ZIP, macOS DMG/app ZIP (Intel and Apple Silicon), and
 Linux AppImage/TAR.GZ (x64 and ARM64). See [installation instructions](docs/INSTALLING.md)
@@ -29,8 +45,9 @@ for choosing and opening a package. These are unsigned development packages;
 Windows/macOS Bluetooth behavior still needs real-machine validation.
 
 The **Desktop packages** GitHub Actions workflow builds and smoke-tests all five
-targets from the same source after changes. Download packages from a successful
-workflow run's artifacts; no release is published automatically. Maintainers can
+targets from the same source after changes. Version tags publish a public
+pre-release only after every build and package verification succeeds. Ordinary
+branch/PR runs keep their downloads as temporary Actions artifacts. Maintainers can
 build locally with `python build_desktop.py --native`. See
 [packaging and release maintenance](docs/PACKAGING.md).
 
