@@ -37,7 +37,7 @@ GOLDEN_CLI = [
     "settings-41",
     "settings-42",
     "set-settings-40 --ble-mode economy --beeps on --dive-type super_slow --temperature-unit fahrenheit",
-    "set-settings-41 --tap-to-enable-ble on --flat-line off",
+    "set-settings-41 --tap-to-enable-ble on --flatline-cutoff 0",
     "set-settings-42 --backlight-value 75 --date-format us --show-time-under-canopy on --lcd-timeout 30",
     "backlight on --value 5",
     "motion-alarm 5 12",

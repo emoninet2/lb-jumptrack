@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from app_metadata import APP_NAME, APP_VERSION
-from gui_backend import CONFIRMATIONS, DeviceSession, Draft, records
+from gui_backend import CONFIRMATIONS, DeviceSession, Draft, Snapshot, records
 from profile_decoder import decode_profile, format_profile_summary, parse_profile
 
 logger = logging.getLogger(__name__)
@@ -173,7 +173,7 @@ class AsyncBridge(QObject):
                 value, error = await coroutine, ""
             except Exception as exc:
                 logger.exception("Desktop background operation failed")
-                value, error = None, str(exc)
+                value, error = None, f"{type(exc).__name__}: {exc}"
             connected = self.session.connected
             if connected:
                 self._was_connected = True
@@ -266,7 +266,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(
             f"JumpTrack Desktop {APP_VERSION}" + (" — Demo" if demo else "")
         )
-        self.resize(1220, 880)
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
@@ -288,7 +287,7 @@ class MainWindow(QMainWindow):
         self.notice.setWordWrap(True)
         self.notice.setObjectName("notice")
         layout.addWidget(self.notice)
-        connection = QHBoxLayout()
+        connection = QGridLayout()
         self.filter = QLineEdit()
         self.filter.setPlaceholderText("Filter device name or address")
         self.filter.setMaximumWidth(250)
@@ -304,16 +303,22 @@ class MainWindow(QMainWindow):
         self.refresh_button.clicked.connect(self.refresh)
         self.disconnect_button = QPushButton("Disconnect")
         self.disconnect_button.clicked.connect(self.disconnect_device)
-        for widget in (
-            self.filter,
-            self.all_devices,
-            self.scan_button,
-            self.devices,
-            self.connect_button,
-            self.refresh_button,
-            self.disconnect_button,
+        filters = QHBoxLayout()
+        filters.addWidget(self.filter)
+        filters.addWidget(self.all_devices)
+        filters.addStretch()
+        connection.addLayout(filters, 0, 0, 1, 5)
+        for column, widget in enumerate(
+            (
+                self.scan_button,
+                self.devices,
+                self.connect_button,
+                self.refresh_button,
+                self.disconnect_button,
+            )
         ):
-            connection.addWidget(widget)
+            connection.addWidget(widget, 1, column)
+        connection.setColumnStretch(1, 1)
         layout.addLayout(connection)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
@@ -342,12 +347,22 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
         self.statusBar().showMessage("Ready — no device connected")
         self._sync()
+        screen = self.screen()
+        available = screen.availableGeometry() if screen else None
+        self.resize(
+            min(1220, int(available.width() * 0.9)) if available else 1100,
+            min(880, int(available.height() * 0.85)) if available else 700,
+        )
 
     def _page(self, title):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(18, 18, 18, 18)
-        self.tabs.addTab(page, title)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(page)
+        self.tabs.addTab(scroll, title)
         return page, layout
 
     def _overview(self):
@@ -453,7 +468,36 @@ class MainWindow(QMainWindow):
             )
             note.setWordWrap(True)
             form.addRow(note)
+            if category == "canopy":
+                guide_group = QGroupBox("Canopy guide")
+                guide_form = QFormLayout(guide_group)
+                guide_form.addRow(
+                    "Guide tones",
+                    self._combo("warnings.canopy.guide", [(0, "Off"), (1, "On")]),
+                )
+                box.addWidget(guide_group)
             box.addWidget(group)
+            if category == "freefall":
+                cutoff_group = QGroupBox("Flatline altitude cutoff")
+                cutoff_form = QFormLayout(cutoff_group)
+                cutoff = self._spin("settings.41.0", 0, 1000)
+                cutoff.setReadOnly(True)
+                cutoff_form.addRow(
+                    "Disable flatline below (device altitude units)", cutoff
+                )
+                self.clear_flatline_button = QPushButton("Clear cutoff (set 0)")
+                self.clear_flatline_button.clicked.connect(
+                    lambda: self.bindings["settings.41.0"].setValue(0)
+                )
+                cutoff_form.addRow(self.clear_flatline_button)
+                cutoff_note = QLabel(
+                    "Altitude is read-only. Clear stages 0 until Apply changes. "
+                    "Zero removes the altitude cutoff; the flatline alarm remains active "
+                    "below the fourth warning subject to descent-speed conditions."
+                )
+                cutoff_note.setWordWrap(True)
+                cutoff_form.addRow(cutoff_note)
+                box.addWidget(cutoff_group)
             box.addStretch()
 
     def _settings(self):
@@ -478,7 +522,6 @@ class MainWindow(QMainWindow):
                             (3, "Super slow"),
                         ],
                     ),
-                    ("Flat-line", "settings.41.0", [(0, "Off"), (1, "On")]),
                 ],
             ),
             (
@@ -519,11 +562,16 @@ class MainWindow(QMainWindow):
             form = QFormLayout(card)
             for label, key, choices in fields:
                 form.addRow(
-                    label, self._combo(key, choices) if choices else self._spin(key)
+                    label,
+                    self._combo(key, choices)
+                    if choices
+                    else self._spin(
+                        key, 0, 1000 if key == "settings.41.0" else 2147483647
+                    ),
                 )
             grid.addWidget(card, index // 2, index % 2)
         note = QLabel(
-            "Amber fields have unsaved edits. Apply distance-unit changes separately from warning edits.\nTAS/SAS selection is unavailable; no verified command has been identified."
+            "Amber fields have unsaved edits. Apply distance-unit changes separately from warning or cutoff edits.\nTAS/SAS selection is unavailable; no verified command has been identified."
         )
         note.setWordWrap(True)
         clock = QGroupBox("Device date and time")
@@ -720,6 +768,12 @@ class MainWindow(QMainWindow):
             )
             for control in binding if isinstance(binding, list) else [binding]:
                 control.setEnabled(enabled)
+        self.clear_flatline_button.setEnabled(
+            available
+            and self.draft is not None
+            and "settings.41.0" in self.draft.snapshot.values
+            and self.draft.value("settings.41.0") != 0
+        )
         pending = len(self.draft.pending) if self.draft else 0
         for category, button in self.sound_buttons.items():
             sound_keys = [f"warnings.{category}.{name}" for name in ("pitch", "volume")]
@@ -800,6 +854,8 @@ class MainWindow(QMainWindow):
 
     def connect_device(self):
         address = self.devices.currentData()
+        if self.draft is not None and not isinstance(self.draft.snapshot, Snapshot):
+            self.draft = None
         if address:
             preserve = (
                 self.draft is not None
@@ -817,6 +873,10 @@ class MainWindow(QMainWindow):
             )
 
     def _loaded(self, snapshot, preserve=False):
+        if not isinstance(snapshot, Snapshot):
+            raise TypeError(
+                "Device did not return a valid snapshot. Reconnect to reload."
+            )
         self.apply_needs_reload = False
         self.current_profile = None
         self.profile_summary.setText(
@@ -853,15 +913,29 @@ class MainWindow(QMainWindow):
     def refresh(self):
         if self.draft:
             self._submit(
-                "Reloading settings and verifying pending edits…",
+                "Reloading form values from the device…",
                 self.bridge.session.reload_settings(self.draft.snapshot),
-                self._settings_reloaded,
+                lambda snapshot: self._settings_reloaded(
+                    snapshot, discard_pending=True
+                ),
             )
 
-    def _settings_reloaded(self, snapshot):
+    def _settings_reloaded(self, snapshot, *, discard_pending=False):
+        if not isinstance(snapshot, Snapshot):
+            raise TypeError(
+                "Device did not return valid settings; local edits were retained."
+            )
         self.apply_needs_reload = False
-        self.draft.reconcile(snapshot)
+        if discard_pending:
+            self.draft = Draft(snapshot)
+        else:
+            self.draft.reconcile(snapshot)
         self._render_snapshot()
+        if discard_pending:
+            self.notice.setText(
+                "Forms reloaded from the device. Unsaved edits discarded; no settings written."
+            )
+            return
         self.notice.setText(
             "Device values reloaded. Remaining highlighted edits are still local; review before Apply."
             if self.draft.pending

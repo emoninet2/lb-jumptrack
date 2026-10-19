@@ -90,7 +90,7 @@ Each row is a public method signature from the master. The direct CLI form is `j
 | `prepareReadDeviceSettingsR41Command()` | `prepareReadDeviceSettingsR41Command` | `settings-41` |
 | `prepareReadDeviceSettingsR42Command()` | `prepareReadDeviceSettingsR42Command` | `settings-42` |
 | `prepareDeviceSettingsW40Command(DeviceBLEMode mode, boolean beeps, DeviceDiveType diveType, DeviceTemperatureUnits temperatureUnits)` | `prepareDeviceSettingsW40Command` | `set-settings-40 --ble-mode economy --beeps on --dive-type super_slow --temperature-unit fahrenheit` |
-| `prepareWriteDeviceSettingsW41Command(boolean tapToEnableBLE, boolean flatLine)` | `prepareWriteDeviceSettingsW41Command` | `set-settings-41 --tap-to-enable-ble on --flat-line off` |
+| `prepareWriteDeviceSettingsW41Command(boolean tapToEnableBLE, boolean flatLine)` | `prepareWriteDeviceSettingsW41Command` | `advanced java prepareWriteDeviceSettingsW41Command true false` |
 | `prepareDeviceSettingsW42Command(int backlightValue, DateFormat dateTime, boolean showTimeUnderCanopy, int lcdTimeOut)` | `prepareDeviceSettingsW42Command` | `set-settings-42 --backlight-value 75 --date-format us --show-time-under-canopy on --lcd-timeout 30` |
 | `prepareBacklightCommand(boolean backlight, int backlightValue)` | `prepareBacklightCommand` | `backlight on --value 5` |
 | `prepareMotionAlarmCommand(int countdown, int sensitivity)` | `prepareMotionAlarmCommand` | `motion-alarm 5 12` |
@@ -126,3 +126,5 @@ Each row is a public method signature from the master. The direct CLI form is `j
 ## Public repository
 
 The extracted Java master is excluded from distribution. Its signature data is checked in for ordinary offline tests. Java-source execution/hash tests run only when that reference is available locally. No open-source license is claimed for translated material.
+
+Hardware verification identified W-41 field 1 as a numeric flatline cutoff altitude. The original Java boolean signature is retained only for compatibility. Normal CLI/GUI settings use the corrected numeric builder; see `settings flatline-cutoff --help`.

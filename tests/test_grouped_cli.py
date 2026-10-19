@@ -89,13 +89,16 @@ class GroupedCLI(unittest.IsolatedAsyncioTestCase):
         dev.get_settings_41 = AsyncMock(return_value="unknown\r\nEOF\r\n")
         dev._write = AsyncMock()
         with self.assertRaises(ValueError):
-            await dev.set_setting_field(41, 0, 1)
+            await dev.set_setting_field(41, 1, 1)
         dev._write.assert_not_called()
         dev.get_settings_41 = AsyncMock(
             return_value="W-41-00000-00000-00000-00000\r\nEOF\r\n"
         )
+        dev.get_all_warnings = AsyncMock(
+            return_value="R-00\nW-16-00000-00000-00000-00000\nW-03-06000-05000-04000-03000\nEOF\n"
+        )
         with self.assertRaises(RuntimeError):
-            await dev.set_setting_field(41, 0, 1)
+            await dev.set_setting_field(41, 1, 1)
 
     async def test_grouped_destructive_gate(self):
         with (

@@ -28,6 +28,7 @@ class DemoDevice:
         self.groups = {40: [0, 0, 0, 0], 41: [0, 1, 0, 0], 42: [0, 30, 1, 50]}
         self.distance = 0
         self.speed = 0
+        self.guide = 0
         self.offset = 0
         self.clock = datetime(2026, 9, 27, 17, 38, 0)
         self.jumps = [35, 34, 33]
@@ -91,6 +92,7 @@ class DemoDevice:
             )
         rows.extend(
             [
+                record(21, (0, 0, 0, self.guide)),
                 record(16, (0, 0, 0, self.distance)),
                 record(17, (0, 0, int(self.offset < 0), abs(self.offset))),
                 record(
@@ -129,9 +131,9 @@ class DemoDevice:
             ("celsius", "fahrenheit").index(temperature_unit),
         ]
 
-    async def set_settings_41(self, *, tap_to_enable_ble, flat_line):
+    async def set_settings_41(self, *, tap_to_enable_ble, flatline_cutoff):
         self.writable()
-        self.groups[41] = [int(flat_line), int(tap_to_enable_ble), 0, 0]
+        self.groups[41] = [int(flatline_cutoff), int(tap_to_enable_ble), 0, 0]
 
     async def set_settings_42(
         self, *, backlight_value, date_format, show_time_under_canopy, lcd_timeout
@@ -181,6 +183,10 @@ class DemoDevice:
         self.writable()
         if category not in self.sounds:
             raise ValueError("Unknown sound category")
+
+    async def set_swoop_guide(self, enabled):
+        self.writable()
+        self.guide = int(enabled)
 
     async def set_active_bank(self, category, bank):
         self.writable()

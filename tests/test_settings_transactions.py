@@ -20,6 +20,38 @@ class SettingsTransactions(unittest.IsolatedAsyncioTestCase):
             self.device = jumptrack.JumpTrack(address="test", allow_writes=True)
         self.device._write = AsyncMock()
 
+    async def test_nonzero_cutoff_write_blocked_before_io(self):
+        with self.assertRaises(ValueError):
+            await self.device.set_setting_field(41, 0, 500)
+        self.device._write.assert_not_awaited()
+
+    async def test_tap_change_preserves_numeric_cutoff(self):
+        state = [500, 0, 0, 0]
+
+        async def read():
+            return "W-41-" + "-".join(f"{v:05d}" for v in state) + "\nEOF\n"
+
+        async def write(command):
+            state[:] = [int(v) for v in command.split("-")[2:]]
+
+        self.device.get_settings_41 = AsyncMock(side_effect=read)
+        self.device._write.side_effect = write
+        await self.device.set_setting_field(41, 1, 1)
+        self.assertEqual(state, [500, 1, 0, 0])
+
+    def test_cutoff_units_and_fourth_warning_limits(self):
+        for value, unit, fourth in [(0, 0, 0), (500, 0, 3000), (300, 1, 1000)]:
+            jumptrack.validate_flatline_cutoff(value, unit, fourth)
+        for value, unit, fourth in [
+            (1001, 0, 3000),
+            (301, 1, 1000),
+            (500, 0, 600),
+            (1, None, 3000),
+            (True, 0, 3000),
+        ]:
+            with self.assertRaises(ValueError):
+                jumptrack.validate_flatline_cutoff(value, unit, fourth)
+
     async def test_concurrent_updates_preserve_both_changes(self):
         state = [0, 0, 0, 0]
 

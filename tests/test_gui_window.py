@@ -38,6 +38,62 @@ class DesktopWindowTests(unittest.TestCase):
         self.window.show()
         self.app.processEvents()
 
+    def test_reload_replaces_pending_form_values_without_writing(self):
+        self.connect_demo()
+        key = "warnings.freefall.bank.1"
+        saved = self.window.draft.snapshot.values[key]
+        self.window.bindings[key][0].setValue(saved[0] + 100)
+        self.assertIn(key, self.window.draft.pending)
+        device = self.window.bridge.session.device
+        with patch.object(device, "set_freefall_warnings", new=AsyncMock()) as write:
+            self.window.refresh()
+            self.idle()
+            write.assert_not_awaited()
+        self.assertFalse(self.window.draft.pending)
+        self.assertEqual(self.window.bindings[key][0].value(), saved[0])
+        self.assertFalse(self.window.apply_button.isEnabled())
+        self.assertTrue(self.window.connected)
+
+    def test_connect_empty_timeout_does_not_create_invalid_draft(self):
+        self.window.scan()
+        self.idle()
+        with patch.object(
+            self.window.bridge.session,
+            "connect",
+            new=AsyncMock(side_effect=TimeoutError()),
+        ):
+            self.window.connect_device()
+            self.idle()
+        self.assertIsNone(self.window.draft)
+        self.assertIn("TimeoutError", self.window.notice.text())
+        self.window.connect_device()
+        self.idle()
+        self.assertIsNotNone(self.window.draft.snapshot)
+        self.assertTrue(self.window.connected)
+
+    def test_invalid_snapshot_cannot_replace_loaded_values(self):
+        self.connect_demo()
+        snapshot = self.window.draft.snapshot
+        with self.assertRaises(TypeError):
+            self.window._loaded(None)
+        self.assertIs(self.window.draft.snapshot, snapshot)
+
+    def test_small_window_keeps_footer_visible_and_tabs_scrollable(self):
+        from PySide6.QtWidgets import QScrollArea
+
+        for width, height in [(1024, 640), (1366, 768)]:
+            self.window.resize(width, height)
+            self.app.processEvents()
+            self.assertLessEqual(self.window.height(), height)
+            self.assertLessEqual(self.window.width(), width)
+            for index in range(self.window.tabs.count()):
+                self.assertIsInstance(self.window.tabs.widget(index), QScrollArea)
+                self.window.tabs.setCurrentIndex(index)
+                self.app.processEvents()
+                footer = self.window.apply_button
+                bottom = footer.mapTo(self.window, footer.rect().bottomRight()).y()
+                self.assertLess(bottom, self.window.height())
+
     def wait_for(self, predicate, timeout=8):
         deadline = time.monotonic() + timeout
         while not predicate() and time.monotonic() < deadline:

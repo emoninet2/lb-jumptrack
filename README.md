@@ -22,20 +22,20 @@ live request. Constants, help, the command tree and dry runs need no connection.
 
 ## Desktop GUI
 
-### Public downloads — v0.1.0 pre-release
+### Public downloads — v0.1.1 pre-release
 
 No GitHub account or Python installation is needed to download these packages.
 
 | Computer | Download |
 | --- | --- |
-| Windows x64 | [Installer (.exe)](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-windows-x86_64-Setup.exe) |
-| Mac — Apple Silicon (M-series) | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-macos-arm64.dmg) |
-| Mac — Intel | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-macos-x86_64.dmg) |
-| Linux x64 | [AppImage](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-linux-x86_64.AppImage) |
-| Linux ARM64 | [AppImage](https://github.com/emoninet2/lb-jumptrack-python/releases/download/v0.1.0/JumpTrack-0.1.0-linux-arm64.AppImage) |
+| Windows x64 | [Installer (.exe)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-windows-x86_64-Setup.exe) |
+| Mac — Apple Silicon (M-series) | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-macos-arm64.dmg) |
+| Mac — Intel | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-macos-x86_64.dmg) |
+| Linux x64 | [AppImage](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-linux-x86_64.AppImage) |
+| Linux ARM64 | [AppImage](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-linux-arm64.AppImage) |
 
-See the [release page](https://github.com/emoninet2/lb-jumptrack-python/releases/tag/v0.1.0)
-for portable alternatives, checksums and testing limitations, or [all releases](https://github.com/emoninet2/lb-jumptrack-python/releases).
+See the [release page](https://github.com/emoninet2/lb-jumptrack/releases/tag/v0.1.1)
+for portable alternatives, checksums and testing limitations, or [all releases](https://github.com/emoninet2/lb-jumptrack/releases).
 These are unsigned development packages; macOS builds are not notarized.
 
 For a computer without Python, the shared desktop build pipeline produces a
@@ -281,7 +281,7 @@ jt settings display backlight on --value 50
 jt settings display date-format eu
 jt settings display show-time-under-canopy on
 jt settings display timeout 30
-jt settings flat-line off
+jt settings flatline-cutoff 500
 ```
 
 `settings show` labels known fields and retains raw responses. Unknown values
@@ -325,6 +325,10 @@ jt alarms warnings flight set 1000 2000 3000
 jt alarms sound canopy set 4 7
 jt alarms sound canopy play
 jt alarms motion 10 5
+jt alarms canopy-guide on
+# Read guide status together with warning banks:
+jt alarms show
+# Original alias:
 jt alarms swoop-guide on
 jt alarms track-guide off
 jt alarms restore-defaults
@@ -354,7 +358,7 @@ jt --dry-run advanced java prepareSetDistanceUOM '["METERS"]'
 jt --dry-run advanced java prepareSendFlightWarningsCommand '[2,["1000","2000","3000","4000"]]'
 jt advanced raw-settings get 40
 jt advanced raw-settings set 40 --ble-mode automatic --beeps off --dive-type default --temperature-unit celsius
-jt advanced raw-settings set 41 --tap-to-enable-ble on --flat-line off
+jt advanced raw-settings set 41 --tap-to-enable-ble on --flatline-cutoff 0
 jt advanced raw-settings set 42 --backlight-value 50 --date-format eu --show-time-under-canopy on --lcd-timeout 30
 ```
 
@@ -465,3 +469,11 @@ No open-source license is granted by this repository at present. Redistribution
 and relicensing rights for translated material have not been established; do not
 assume the Python translation is MIT-licensed. Excluding the Java reference does
 not itself resolve those rights.
+
+Canopy guide is also available under **Warnings → Canopy** in the desktop app. Changes are staged until Apply changes and verified using W-21 readback. Devices that do not report a valid guide status leave this control unavailable.
+
+Flatline cutoff is a numeric altitude reported by R-41. Hardware tests confirmed that writes of 0 and 1 take effect, while 500, 600 and 800 are echoed without changing the setting. Nonzero cutoff changes are therefore blocked in normal backend/CLI/GUI operations.
+
+Read it with `jt settings flatline-cutoff`. To remove the altitude cutoff, use `jt settings flatline-cutoff 0`. Zero keeps the final flatline alarm active below the fourth warning subject to descent-speed conditions; it does not disable the alarm. In **Warnings → Freefall**, the altitude is read-only and **Clear cutoff (set 0)** stages zero until **Apply changes**. Bluetooth tap changes preserve the existing numeric cutoff. Set nonzero altitudes manually on the device.
+
+The original Java boolean builder remains available only through the advanced compatibility interface.

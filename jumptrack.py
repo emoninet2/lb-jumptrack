@@ -428,11 +428,17 @@ class JumpTrack:
             or value not in SETTINGS_ALLOWED[group][index]
         ):
             raise ValueError("Invalid settings field or value")
+        if group == 41 and index == 0 and value != 0:
+            raise ValueError(
+                "Flatline cutoff is read-only; only zero (no altitude cutoff) is verified writable"
+            )
         read = getattr(self, f"get_settings_{group}")
         async with self.settings_lock:
             fields = parse_settings_record(await read(), group)
             if fields[index] == value:
                 return f"Settings W-{group} field {index + 1} already set to {value}."
+            if group == 41 and index == 0:
+                await self._validate_flatline_cutoff(value)
             fields[index] = value
             try:
                 await self._write(f"W-{group}-" + "-".join(f"{v:05d}" for v in fields))
@@ -458,11 +464,35 @@ class JumpTrack:
             return f"Button beeps already {state}."
         return f"Button beeps {state} (verified by R-40)."
 
-    async def set_settings_41(self, *, tap_to_enable_ble, flat_line):
+    async def get_flatline_cutoff(self):
+        value = parse_settings_record(await self.get_settings_41(), 41)[0]
+        return f"Flatline cutoff: {value} (device altitude units; 0 = no altitude cutoff). Only writing zero is supported."
+
+    async def _validate_flatline_cutoff(self, value):
+        raw = await self.get_all_warnings()
+        # Parse the full numeric field rather than treating this altitude as a flag.
+        unit_match = re.search(r"(?m)^W-16-\d{5}-\d{5}-\d{5}-(\d{5})\s*$", raw)
+        warning = parse_warning_configuration(raw)["categories"]["freefall"][
+            "active_warning_altitudes"
+        ]
+        validate_flatline_cutoff(
+            value,
+            int(unit_match[1]) if unit_match else None,
+            warning[3] if warning else None,
+        )
+
+    async def set_settings_41(self, *, tap_to_enable_ble, flatline_cutoff):
+        if not self.allow_writes:
+            raise PermissionError("Configuration commands disabled")
         async with self.settings_lock:
+            current = parse_settings_record(await self.get_settings_41(), 41)
+            if flatline_cutoff != current[0] and flatline_cutoff != 0:
+                raise ValueError(
+                    "Only clearing the flatline cutoff to zero is verified writable"
+                )
             return await self._write(
                 self.commands.set_settings_41(
-                    tap_to_enable_ble=tap_to_enable_ble, flat_line=flat_line
+                    tap_to_enable_ble=tap_to_enable_ble, flatline_cutoff=flatline_cutoff
                 )
             )
 
@@ -545,7 +575,7 @@ def format_settings(raw):
             ("Temperature units", ("celsius", "fahrenheit")),
         ),
         41: (
-            ("Flat-line", ("off", "on")),
+            ("Disable flatline below (device altitude units; 0 = no cutoff)", None),
             ("Tap to enable BLE", ("off", "on")),
             ("Reserved field 3", None),
             ("Reserved field 4", None),
@@ -586,9 +616,26 @@ def format_settings(raw):
     return "\n".join(lines) + "\n\nRaw responses:\n" + raw
 
 
+def validate_flatline_cutoff(value, unit, fourth_warning):
+    """Validate the manual's cutoff limits using current device units."""
+    if type(value) is not int or unit not in (0, 1):
+        raise ValueError(
+            "Flatline cutoff requires an integer altitude and known device units"
+        )
+    maximum, gap = (1000, 200) if unit == 0 else (300, 70)
+    if not 0 <= value <= maximum:
+        raise ValueError(
+            f"Flatline cutoff must be between 0 and {maximum} in device distance units"
+        )
+    if value and (fourth_warning is None or value > fourth_warning - gap):
+        raise ValueError(
+            f"Flatline cutoff must be at least {gap} below the fourth freefall warning"
+        )
+
+
 SETTINGS_ALLOWED = {
     40: ((0, 1), (0, 1), (0, 1, 2, 3), (0, 1)),
-    41: ((0, 1), (0, 1), (0,), (0,)),
+    41: (range(1001), (0, 1), (0,), (0,)),
     42: ((0, 1), range(2147483648), (0, 1), range(2147483648)),
 }
 
@@ -719,6 +766,9 @@ def parse_warning_configuration(raw):
         }
     battery = parse_battery_information(raw)
     return {
+        "guide_enabled": (
+            records[21][3] if 21 in records and records[21][3] in (0, 1) else None
+        ),
         "categories": categories,
         "altitude_unit": "unverified",
         "battery": battery["raw"],
@@ -734,6 +784,10 @@ def format_warning_configuration(config):
         "=" * 40,
         "Altitude unit: not verified (values shown as transmitted)",
     ]
+    guide = config.get("guide_enabled")
+    lines.append(
+        "Canopy guide: " + ("unknown" if guide is None else "on" if guide else "off")
+    )
     for name, info in config["categories"].items():
         lines.extend(
             [

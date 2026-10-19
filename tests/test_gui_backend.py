@@ -9,6 +9,46 @@ from gui_demo import DemoSession
 
 
 class DesktopSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_numeric_flatline_readonly_clear_and_tap_preservation(self):
+        self.device.groups[41][0] = 500
+        snapshot = await self.session.read_snapshot()
+        draft = Draft(snapshot)
+        with self.assertRaises(ValueError):
+            draft.set("settings.41.0", 600)
+        result = await self.session.apply(snapshot, {"settings.41.1": 0})
+        self.assertFalse(result.error)
+        self.assertEqual(result.snapshot.values["settings.41.0"], 500)
+        result = await self.session.apply(result.snapshot, {"settings.41.0": 0})
+        self.assertFalse(result.error)
+        self.assertEqual(result.snapshot.values["settings.41.0"], 0)
+        self.assertTrue(self.session.connected)
+
+    async def test_guide_staged_apply_readback_and_missing_status(self):
+        from jumptrack import format_warning_configuration, parse_warning_configuration
+
+        key = "warnings.canopy.guide"
+        draft = Draft(self.snapshot)
+        draft.set(key, 1)
+        self.assertEqual(self.device.guide, 0)
+        result = await self.session.apply(self.snapshot, draft.pending)
+        self.assertFalse(result.error)
+        self.assertIn(key, result.verified)
+        self.assertEqual(result.snapshot.values[key], 1)
+        self.assertTrue(self.session.connected)
+        draft.reconcile(result.snapshot)
+        self.assertFalse(draft.pending)
+        result = await self.session.apply(result.snapshot, {key: 0})
+        self.assertFalse(result.error)
+        self.assertEqual(result.snapshot.values[key], 0)
+        raw = await self.device.get_all_warnings()
+        config = parse_warning_configuration(raw)
+        self.assertIn("Canopy guide: off", format_warning_configuration(config))
+        for replacement in ("", "W-21-00000-00000-00000-00002"):
+            config = parse_warning_configuration(
+                raw.replace("W-21-00000-00000-00000-00000", replacement)
+            )
+            self.assertIsNone(config["guide_enabled"])
+
     async def test_sound_playback_only_uses_play_command_and_retains_connection(self):
         self.device.play_sound = AsyncMock(wraps=self.device.play_sound)
         self.device.set_sound = AsyncMock(wraps=self.device.set_sound)

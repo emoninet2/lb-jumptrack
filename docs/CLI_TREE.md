@@ -38,7 +38,7 @@ jumptrack.py
 │   │   ├── show-time-under-canopy — Change show-time-under-canopy
 │   │   └── timeout — Change timeout
 │   ├── dive-type — Read or change dive-type
-│   └── flat-line — Change flat-line
+│   └── flatline-cutoff — Change flatline-cutoff
 ├── alarms — Warnings, sounds and guidance
 │   ├── show — Read all warning settings (R-00)
 │   ├── warnings — Warnings by flight phase
@@ -62,6 +62,7 @@ jumptrack.py
 │   │       ├── set — Set category pitch and volume
 │   │       └── play — Play a category sound
 │   ├── motion — Enable motion alarm with countdown and sensitivity
+│   ├── canopy-guide — Turn swoop guide on/off (both use W-21)
 │   ├── swoop-guide — Turn swoop guide on/off (both use W-21)
 │   ├── track-guide — Turn track guide on/off (both use W-21)
 │   └── restore-defaults — Restore default alarm values
@@ -74,7 +75,7 @@ jumptrack.py
 │   └── raw-settings — Read or replace complete settings groups
 │       ├── get — Get a settings group
 │       │   ├── 40 — Read BLE, beeps, dive and temperature settings
-│       │   ├── 41 — Read tap-to-enable-BLE and flat-line settings
+│       │   ├── 41 — Read tap-to-enable-BLE and flatline cutoff altitude
 │       │   └── 42 — Read display settings
 │       └── set — Set a settings group
 │           ├── 40 — Replace all four W-40 fields
@@ -82,7 +83,3 @@ jumptrack.py
 │           └── 42 — Replace all four display settings fields
 └── tree — Show the command hierarchy (offline)
 ```
-
-Use `--help` at any level for arguments. Global flags go before the first command.
-Original flat spellings remain supported but are omitted from this tree.
-TAS/SAS is deferred until a verified command is identified.

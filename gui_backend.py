@@ -19,6 +19,7 @@ from jumptrack import (
     parse_settings_record,
     parse_warning_configuration,
     scan_devices,
+    validate_flatline_cutoff,
 )
 from profile_decoder import parse_profile
 
@@ -77,13 +78,13 @@ class Draft:
 
 
 def validate_change(key, value):
-    if key in ("distance_unit", "speed_unit"):
+    if key in ("distance_unit", "speed_unit", "warnings.canopy.guide"):
         allowed = (0, 1)
     elif re.fullmatch(r"settings\.(40|41|42)\.[0-3]", key):
         group, index = map(int, key.split(".")[1:])
         from jumptrack import SETTINGS_ALLOWED
 
-        allowed = SETTINGS_ALLOWED[group][index]
+        allowed = (0,) if (group, index) == (41, 0) else SETTINGS_ALLOWED[group][index]
         if group == 41 and index > 1:
             raise ValueError("Reserved fields cannot be edited")
     elif re.fullmatch(r"warnings\.(freefall|canopy|flight)\.bank\.[1-4]", key):
@@ -195,6 +196,8 @@ class DeviceSession:
                     labels.add("Speed units")
                 elif key.startswith("settings."):
                     labels.add("Settings " + key.split(".")[1])
+                    if key == "settings.41.0":
+                        labels.add("Warnings")
             requests = [(label, call) for label, call in requests if label in labels]
         # A failed request stops the operation without closing the session.
         for label, call in requests:
@@ -242,6 +245,8 @@ class DeviceSession:
             )
         try:
             warnings = parse_warning_configuration(snapshot.raw["Warnings"])
+            if warnings["guide_enabled"] is not None:
+                snapshot.values["warnings.canopy.guide"] = warnings["guide_enabled"]
             snapshot.details["battery"] = warnings["battery"] or "Not reported"
             for category, config in warnings["categories"].items():
                 for bank, altitudes in config["banks"].items():
@@ -380,7 +385,7 @@ class DeviceSession:
                     "temperature_unit": ("celsius", "fahrenheit")[v[3]],
                 }
             elif group == 41:
-                kwargs = {"flat_line": bool(v[0]), "tap_to_enable_ble": bool(v[1])}
+                kwargs = {"flatline_cutoff": v[0], "tap_to_enable_ble": bool(v[1])}
             else:
                 kwargs = {
                     "date_format": ("eu", "us")[v[0]],
@@ -431,6 +436,16 @@ class DeviceSession:
                 plan.append(
                     ([key], partial(self.device.set_active_bank, category, values[key]))
                 )
+        if "warnings.canopy.guide" in changes:
+            plan.append(
+                (
+                    ["warnings.canopy.guide"],
+                    partial(
+                        self.device.set_swoop_guide,
+                        bool(values["warnings.canopy.guide"]),
+                    ),
+                )
+            )
         # Unit changes come last, never together with warning edits.
         for key, call, choices in [
             ("distance_unit", self.device.set_distance_uom, ("feet", "meters")),
@@ -454,7 +469,7 @@ class DeviceSession:
                 raise ValueError("Cannot write a setting that was not loaded")
             validate_change(key, value)
         if "distance_unit" in changes and any(
-            key.startswith("warnings.") for key in changes
+            key.startswith("warnings.") or key == "settings.41.0" for key in changes
         ):
             raise ValueError(
                 "Apply distance-unit changes separately, reload, then edit warning values."
@@ -489,6 +504,15 @@ class DeviceSession:
         remaining = {
             key: value for key, value in changes.items() if fresh.values[key] != value
         }
+        if "settings.41.0" in changes:
+            # W-41 is applied before warning edits, so validate against the current bank.
+            bank = fresh.values.get("warnings.freefall.active_bank")
+            altitudes = fresh.values.get(f"warnings.freefall.bank.{bank}")
+            validate_flatline_cutoff(
+                changes["settings.41.0"],
+                fresh.values.get("distance_unit"),
+                altitudes[3] if altitudes else None,
+            )
         verified = [key for key in changes if key not in remaining]
         device = self.device
         try:

@@ -143,7 +143,7 @@ CASES = [
         "prepareWriteDeviceSettingsW41Command",
         "set_settings_41",
         (),
-        {"tap_to_enable_ble": True, "flat_line": False},
+        {"tap_to_enable_ble": True, "flatline_cutoff": 0},
         "W-41-00000-00001-00000-00000",
     ),
     (
@@ -306,8 +306,8 @@ class BuilderTests(unittest.TestCase):
                 f"W-40-00000-00000-{code}-00000",
             )
         self.assertEqual(
-            self.b.set_settings_41(tap_to_enable_ble=False, flat_line=True),
-            "W-41-00001-00000-00000-00000",
+            self.b.set_settings_41(tap_to_enable_ble=False, flatline_cutoff=500),
+            "W-41-00500-00000-00000-00000",
         )
         self.assertEqual(
             self.b.set_settings_42(
@@ -377,7 +377,9 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         self.device = jumptrack.JumpTrack(address="test-device")
 
     async def test_all_wrappers_forward_commands(self):
-        self.device.send_command = AsyncMock(return_value="EOF\r\n")
+        self.device.send_command = AsyncMock(
+            return_value="W-41-00000-00000-00000-00000\nEOF\n"
+        )
         for _, method, args, kwargs, expected in CASES:
             self.device.allow_writes = self.device.allow_destructive = True
             await getattr(self.device, method)(*args, **kwargs)

@@ -39,7 +39,7 @@ SIMPLE = (
     (
         "settings-41",
         "get_settings_41",
-        "Read tap-to-enable-BLE and flat-line settings",
+        "Read tap-to-enable-BLE and flatline cutoff altitude",
         "read",
     ),
     ("settings-42", "get_settings_42", "Read display settings", "read"),
@@ -229,7 +229,12 @@ def _legacy_commands(parser, *, include_category=True):
         "Replace W-41 fields; reserved fields are set to zero",
     )
     p.add_argument("--tap-to-enable-ble", required=True, choices=("on", "off"))
-    p.add_argument("--flat-line", required=True, choices=("on", "off"))
+    p.add_argument(
+        "--flatline-cutoff",
+        required=True,
+        type=bounded(0, 1000),
+        help="Use 0 to clear the cutoff; an unchanged current value may be preserved",
+    )
     p = command(
         "set-settings-42", "set_settings_42", "Replace all four display settings fields"
     )
@@ -380,6 +385,9 @@ def add_commands(parser):
             description=help_text + "; preserve other settings and verify changes.",
         )
         options = {"choices": choices} if choices else {"type": bounded(0, 2147483647)}
+        if name == "flatline-cutoff":
+            child.description = "Read the cutoff altitude in device distance units. Only writing 0 is supported: removes the altitude cutoff, keeping the flatline alarm active below the fourth warning subject to descent-speed conditions. Nonzero writes are unverified and blocked."
+            options = {"type": int, "choices": (0,), "nargs": "?"}
         if name == "dive-type":
             options["nargs"] = "?"
         child.add_argument("value", **options)
@@ -402,7 +410,7 @@ def add_commands(parser):
     field(display, "show-time-under-canopy", 42, 2, ("off", "on"))
     field(display, "timeout", 42, 1)
     field(settings, "dive-type", 40, 2, ("default", "3_seconds", "slow", "super_slow"))
-    field(settings, "flat-line", 41, 0, ("off", "on"))
+    field(settings, "flatline-cutoff", 41, 0)
     alarms = group(root, "alarms", "Warnings, sounds and guidance")
     leaf(alarms, "show", "warnings")
     # Category is a real subcommand so each category has its own useful help.
@@ -417,6 +425,7 @@ def add_commands(parser):
                 leaf(actions, name, original, category=category)
     for name, original in (
         ("motion", "motion-alarm"),
+        ("canopy-guide", "swoop-guide"),
         ("swoop-guide", "swoop-guide"),
         ("track-guide", "track-guide"),
         ("restore-defaults", "default-alarms"),
@@ -476,7 +485,9 @@ def operation(args):
     """Resolve parsed arguments without connecting to Bluetooth."""
     if args.action == "setting-field":
         if args.value is None:
-            return Operation("get_dive_type")
+            return Operation(
+                "get_flatline_cutoff" if args.setting_group == 41 else "get_dive_type"
+            )
         value = (
             args.field_choices.index(args.value) if args.field_choices else args.value
         )
@@ -545,7 +556,7 @@ def operation(args):
     elif method == "set_settings_41":
         kwargs = {
             "tap_to_enable_ble": on_off(args.tap_to_enable_ble),
-            "flat_line": on_off(args.flat_line),
+            "flatline_cutoff": args.flatline_cutoff,
         }
     elif method == "set_settings_42":
         kwargs = {
@@ -578,6 +589,8 @@ def preview(op, builder):
     if op.method == "execute_java":
         method, *args = op.args
         return getattr(builder, method)(*args)
+    if op.method == "get_flatline_cutoff":
+        return "R-41 -> read numeric cutoff altitude (field 1; 0 = no altitude cutoff)"
     if op.method == "get_dive_type":
         return "R-40 -> decode dive-type field (field 3)"
     if op.method == "get_all_settings":

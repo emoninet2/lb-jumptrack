@@ -180,8 +180,12 @@ class UARTCommandBuilder(JavaUARTCommandBuilder):
             ),
         )
 
-    def set_settings_41(self, *, tap_to_enable_ble, flat_line):
-        return self.prepareWriteDeviceSettingsW41Command(tap_to_enable_ble, flat_line)
+    def set_settings_41(self, *, tap_to_enable_ble, flatline_cutoff):
+        if type(flatline_cutoff) is not int or not 0 <= flatline_cutoff <= 1000:
+            raise ValueError(
+                "Flatline cutoff must be an integer altitude from 0 to 1000"
+            )
+        return f"W-41-{flatline_cutoff:05d}-{int(tap_to_enable_ble):05d}-00000-00000"
 
     def set_settings_42(
         self, *, backlight_value, date_format, show_time_under_canopy, lcd_timeout
