@@ -295,7 +295,11 @@ class MainWindow(QMainWindow):
         self.scan_button = QPushButton("Scan Bluetooth")
         self.scan_button.clicked.connect(self.scan)
         self.devices = QComboBox()
-        self.devices.setMinimumWidth(290)
+        self.devices.setMinimumWidth(180)
+        self.devices.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.devices.setMinimumContentsLength(16)
         self.connect_button = QPushButton("Connect")
         self.connect_button.setObjectName("primary")
         self.connect_button.clicked.connect(self.connect_device)

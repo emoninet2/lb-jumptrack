@@ -22,19 +22,19 @@ live request. Constants, help, the command tree and dry runs need no connection.
 
 ## Desktop GUI
 
-### Public downloads — v0.1.1 pre-release
+### Public downloads — v0.1.2 pre-release
 
 No GitHub account or Python installation is needed to download these packages.
 
 | Computer | Download |
 | --- | --- |
-| Windows x64 | [Installer (.exe)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-windows-x86_64-Setup.exe) |
-| Mac — Apple Silicon (M-series) | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-macos-arm64.dmg) |
-| Mac — Intel | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-macos-x86_64.dmg) |
-| Linux x64 | [AppImage](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-linux-x86_64.AppImage) |
-| Linux ARM64 | [AppImage](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.1/JumpTrack-0.1.1-linux-arm64.AppImage) |
+| Windows x64 | [Installer (.exe)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.2/JumpTrack-0.1.2-windows-x86_64-Setup.exe) |
+| Mac — Apple Silicon (M-series) | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.2/JumpTrack-0.1.2-macos-arm64.dmg) |
+| Mac — Intel | [Disk image (.dmg)](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.2/JumpTrack-0.1.2-macos-x86_64.dmg) |
+| Linux x64 | [AppImage](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.2/JumpTrack-0.1.2-linux-x86_64.AppImage) |
+| Linux ARM64 | [AppImage](https://github.com/emoninet2/lb-jumptrack/releases/download/v0.1.2/JumpTrack-0.1.2-linux-arm64.AppImage) |
 
-See the [release page](https://github.com/emoninet2/lb-jumptrack/releases/tag/v0.1.1)
+See the [release page](https://github.com/emoninet2/lb-jumptrack/releases/tag/v0.1.2)
 for portable alternatives, checksums and testing limitations, or [all releases](https://github.com/emoninet2/lb-jumptrack/releases).
 These are unsigned development packages; macOS builds are not notarized.
 
